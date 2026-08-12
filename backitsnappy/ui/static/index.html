@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BackitSnappy</title>
+  <link rel="stylesheet" href="/css/hig.css" />
+</head>
+<body>
+  <!-- First-run setup wizard -->
+  <div id="setup-overlay">
+    <div class="wizard-card">
+      <div id="wizard-step-credentials">
+        <div class="wizard-title">Connect Telegram</div>
+        <div class="wizard-subtitle">Get your api_id and api_hash from my.telegram.org/apps</div>
+        <div class="field">
+          <label>API ID</label>
+          <input type="text" id="input-api-id" inputmode="numeric" placeholder="1234567" />
+        </div>
+        <div class="field">
+          <label>API Hash</label>
+          <input type="text" id="input-api-hash" placeholder="0123456789abcdef0123456789abcdef" />
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-submit-credentials">Continue</button>
+        <div class="wizard-error" id="error-credentials"></div>
+      </div>
+
+      <div id="wizard-step-phone" class="hidden">
+        <div class="wizard-title">Sign in</div>
+        <div class="wizard-subtitle">Enter your phone number, with country code</div>
+        <div class="field">
+          <label>Phone number</label>
+          <input type="text" id="input-phone" placeholder="+15551234567" />
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-submit-phone">Send code</button>
+        <div class="wizard-error" id="error-phone"></div>
+      </div>
+
+      <div id="wizard-step-code" class="hidden">
+        <div class="wizard-title">Enter code</div>
+        <div class="wizard-subtitle">Telegram sent you a login code</div>
+        <div class="field">
+          <label>Code</label>
+          <input type="text" id="input-code" inputmode="numeric" placeholder="12345" />
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-submit-code">Verify</button>
+        <div class="wizard-error" id="error-code"></div>
+      </div>
+
+      <div id="wizard-step-password" class="hidden">
+        <div class="wizard-title">Two-step verification</div>
+        <div class="wizard-subtitle">Enter your Telegram cloud password</div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="input-password" />
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-submit-password">Verify</button>
+        <div class="wizard-error" id="error-password"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="app" class="hidden">
+    <div class="sidebar">
+      <div class="sidebar-title">BackitSnappy</div>
+      <div class="nav-item selected" data-view="storage"><span class="icon">🗂</span>Storage</div>
+      <div class="nav-item" data-view="albums"><span class="icon">🖼</span>Albums</div>
+      <div class="nav-item" data-view="settings"><span class="icon">⚙</span>Settings</div>
+    </div>
+
+    <div class="main">
+      <!-- Storage view -->
+      <div id="view-storage" class="view">
+        <div class="page-title">Storage</div>
+        <div class="dropzone" id="dropzone-storage">
+          <div class="icon">⬆︎</div>
+          <div>Drag files here to back them up, or <span style="color: var(--system-blue); cursor: pointer;" id="btn-browse-storage">choose files</span></div>
+          <input type="file" id="file-input-storage" multiple class="hidden" />
+        </div>
+        <div id="uploads-storage"></div>
+        <div class="section-header">Files</div>
+        <div class="list" id="file-list-storage"></div>
+      </div>
+
+      <!-- Albums view -->
+      <div id="view-albums" class="view hidden">
+        <div class="page-title">Albums</div>
+        <div class="field" style="display:flex; gap: 8px; align-items: flex-end;">
+          <div style="flex:1;">
+            <label>New album name</label>
+            <input type="text" id="input-album-name" placeholder="Summer 2026" />
+          </div>
+          <button class="btn btn-primary" id="btn-create-album">Create</button>
+        </div>
+        <div class="section-header">Your albums</div>
+        <div class="list" id="album-list"></div>
+
+        <div id="album-detail" class="hidden">
+          <div class="section-header" id="album-detail-title"></div>
+          <div class="dropzone" id="dropzone-album">
+            <div class="icon">⬆︎</div>
+            <div>Drag files here to add to this album, or <span style="color: var(--system-blue); cursor: pointer;" id="btn-browse-album">choose files</span></div>
+            <input type="file" id="file-input-album" multiple class="hidden" />
+          </div>
+          <div id="uploads-album"></div>
+          <div class="field" style="display:flex; gap: 8px; align-items: flex-end;">
+            <div style="flex:1;">
+              <label>Invite by username</label>
+              <input type="text" id="input-invite-username" placeholder="@friend" />
+            </div>
+            <button class="btn btn-secondary" id="btn-invite">Invite</button>
+          </div>
+          <div id="invite-result"></div>
+          <div class="section-header">Files</div>
+          <div class="list" id="file-list-album"></div>
+        </div>
+      </div>
+
+      <!-- Settings view -->
+      <div id="view-settings" class="view hidden">
+        <div class="page-title">Settings</div>
+        <div class="card" style="padding: 16px;">
+          <div class="list-row" style="border:none; padding: 8px 0;">
+            <div class="list-row-title">Auto-backup folder</div>
+            <div class="list-row-subtitle" id="current-watch-folder">Not set</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <input type="text" id="input-watch-folder" placeholder="/Users/you/Pictures/BackitSnappy" style="flex:1; min-height:36px; border-radius:8px; border:1px solid var(--separator); padding: 0 12px; background: var(--bg-secondary); color: var(--label-primary);" />
+            <button class="btn btn-secondary" id="btn-save-watch-folder">Save</button>
+          </div>
+        </div>
+
+        <div class="section-header">iPhone access (Tailscale)</div>
+        <div class="card" style="padding: 16px; display:flex; align-items:center; justify-content: space-between;">
+          <div>
+            <div class="list-row-title">Allow uploads over Tailscale</div>
+            <div class="list-row-subtitle">Restart BackitSnappy after changing this</div>
+          </div>
+          <div class="toggle-track" id="toggle-tailscale"><div class="toggle-thumb"></div></div>
+        </div>
+
+        <div class="section-header">iOS Shortcut pairing</div>
+        <div class="card" style="padding: 16px;">
+          <div class="list-row-subtitle" style="margin-bottom: 8px;">Use this token as the <code>X-Pairing-Token</code> header in your iOS Shortcut's upload request.</div>
+          <div class="invite-link-box" id="pairing-token-box">••••••••••••••••••••••••</div>
+          <div style="margin-top: 8px; display:flex; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-reveal-token">Reveal</button>
+            <button class="btn btn-destructive" id="btn-rotate-token">Rotate token</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/setup.js"></script>
+  <script src="/js/albums.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
