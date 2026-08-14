@@ -23,24 +23,20 @@ version:
    in with your phone number, and create an app. Note the `api_id` and
    `api_hash`. (There's a button to jump straight to this page from inside
    the app's own setup screen too.)
-2. **Install ffmpeg** (used to generate video thumbnails): `brew install
-   ffmpeg`. Without it, videos still back up and play fine — they just show a
-   generic file icon instead of a thumbnail.
-3. **Run the app:**
+2. **Run the app:**
    ```sh
    ./run.sh
    ```
-   This creates/activates the venv, installs dependencies, and launches
-   BackitSnappy. (See `.env.example` for the full list of values you'll be
-   asked for — they're entered through the app's own setup screen, not a
-   `.env` file.)
-4. On first launch, enter your `api_id`/`api_hash`, then your phone number,
+   This creates/activates the venv and installs dependencies — including a
+   bundled ffmpeg (for video thumbnails), so there's nothing to install
+   separately — then launches BackitSnappy.
+3. On first launch, enter your `api_id`/`api_hash`, then your phone number,
    then the login code Telegram sends you (and your two-step verification
    password, if you have one set). Your session is saved to the macOS
    Keychain — you won't need to sign in again.
-5. A private "BackitSnappy Storage" channel and an "iPhone Backup" album are
+4. A private "BackitSnappy Storage" channel and an "iPhone Backup" album are
    created automatically on your Telegram account the first time you sign in.
-6. A short, skippable welcome tour walks through Albums and Settings the
+5. A short, skippable welcome tour walks through Albums and Settings the
    first time you open the app. Replay it anytime from **Settings → Help →
    Replay welcome tour**.
 

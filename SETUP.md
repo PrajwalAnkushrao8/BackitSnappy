@@ -37,10 +37,12 @@ With that said, here's how to get set up.
 ## 1. Prerequisites
 
 - A Mac running macOS.
-- [Homebrew](https://brew.sh), if you don't already have it.
-- ffmpeg, for video thumbnails: `brew install ffmpeg`. Not strictly
-  required — without it, videos still back up and play fine, they just show
-  a generic file icon instead of a thumbnail.
+- Python 3 (from [python.org](https://python.org) or Homebrew, if you don't
+  already have it).
+
+That's it — `run.sh` handles the rest, including ffmpeg (used for video
+thumbnails), which is installed automatically as a Python dependency. No
+separate `brew install` step needed.
 
 ## 2. Get Telegram API credentials (one-time, every Telegram app needs this)
 

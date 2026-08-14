@@ -23,6 +23,24 @@ THUMBNAIL_SIZE = 320
 THUMBNAIL_QUALITY = 85
 FFMPEG_TIMEOUT_SECONDS = 30
 
+
+def _resolve_ffmpeg() -> str | None:
+    """Prefer a system ffmpeg on PATH (respects an existing install), and
+    fall back to the binary bundled by the imageio-ffmpeg package so users
+    never need to `brew install ffmpeg` themselves. None if truly
+    unavailable (e.g. the pip package failed to install on an unsupported
+    platform) -- callers already degrade to "no thumbnail" in that case."""
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        logger.exception("Bundled ffmpeg (imageio-ffmpeg) unavailable")
+        return None
+
 def _thumbnails_dir() -> Path:
     # A function, not a module-level constant, so it picks up config.APP_SUPPORT_DIR
     # being overridden (e.g. in tests) even after this module has been imported.
@@ -84,14 +102,15 @@ def _generate_image_thumbnail(source_path: Path, dest: Path) -> bool:
 
 
 def _generate_video_thumbnail(source_path: Path, dest: Path) -> bool:
-    if shutil.which("ffmpeg") is None:
-        logger.warning("ffmpeg not found on PATH; skipping video thumbnail for %s", source_path)
+    ffmpeg = _resolve_ffmpeg()
+    if ffmpeg is None:
+        logger.warning("No ffmpeg available (system or bundled); skipping video thumbnail for %s", source_path)
         return False
 
     offset = _pick_seek_offset(source_path)
     result = subprocess.run(
         [
-            "ffmpeg", "-y",
+            ffmpeg, "-y",
             "-ss", f"{offset:.3f}",
             "-i", str(source_path),
             "-frames:v", "1",
@@ -114,7 +133,11 @@ def _generate_video_thumbnail(source_path: Path, dest: Path) -> bool:
 
 def _pick_seek_offset(source_path: Path) -> float:
     """Pick a safe seek offset for the thumbnail frame, clamped to the
-    video's actual duration so short clips don't produce an empty frame."""
+    video's actual duration so short clips don't produce an empty frame.
+    Only checks system PATH -- imageio-ffmpeg (the pip-bundled fallback
+    above) doesn't ship ffprobe, only ffmpeg. That's fine: this is a purely
+    cosmetic best-effort (a better mid-clip frame instead of the very
+    first one), already designed to degrade to 0.0 when unavailable."""
     if shutil.which("ffprobe") is None:
         return 0.0
     try:
