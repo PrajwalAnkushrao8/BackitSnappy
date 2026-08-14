@@ -154,20 +154,38 @@ needs, each with a Copy button: the **Upload URL** (auto-detected from your
 Mac's current Tailscale IP), your **Pairing Token**, and the **iPhone
 Backup Album ID**.
 
-### 7e. Import and run the Shortcut
+### 7e. Import and set up the Shortcut
 
-1. Open the import link on your iPhone (an iCloud share link) and tap **Add
-   Shortcut** in the Shortcuts app.
-2. The **first time** you run it, it'll prompt you to paste in the three
-   values from step 7d — Upload URL, Pairing Token, and Album ID. It
-   remembers them after that; you won't be asked again on later runs.
-3. Run it by opening the Shortcuts app and tapping it, adding it to your
+1. On your iPhone, open the import link:
+   **https://www.icloud.com/shortcuts/b3be88afbd744f04af957115e89c9ca7**
+   and tap **Add Shortcut** in the Shortcuts app.
+2. **Before running it the first time, edit it** to fill in your own
+   values — the imported Shortcut ships with placeholder text, not a live
+   prompt, so this is a one-time manual edit, not something it asks you for
+   automatically:
+
+   ![The imported Shortcut's Get Contents of URL action, showing placeholder text in the URL, X-Pairing-Token header, and album_id field](images/shortcut-setup.png)
+
+   - Tap the URL field (showing `type/ your url`) and replace it with the
+     **Upload URL** from Settings → iOS Shortcut setup (step 7d).
+   - Tap the `X-Pairing-Token` header value (showing `type your sh...`) and
+     replace it with your **Pairing Token**.
+   - Tap the `album_id` field (showing `type your alb...`) and replace it
+     with your **iPhone Backup Album ID**.
+   - Leave `file` as-is — it's already correctly bound to the photo you
+     select.
+3. These values are saved as part of the Shortcut once you set them — you
+   won't need to re-edit it on every run. You *will* need to update it again
+   if you ever rotate your pairing token, or if your Mac's Tailscale IP
+   changes and Settings shows a different Upload URL after hitting
+   "Refresh."
+4. Run it by opening the Shortcuts app and tapping it, adding it to your
    Home Screen as its own icon for one-tap access, or (if you name it
    something recognizable) triggering it by voice via Siri.
-4. It selects photo(s) via the Photos picker — make sure **Settings →
+5. It selects photo(s) via the Photos picker — make sure **Settings →
    Privacy & Security → Photos → Shortcuts** is set to **Full Access** first,
    or the picker can silently fail to hand over what you selected.
-5. There's no progress bar on the phone itself — it's a background upload.
+6. There's no progress bar on the phone itself — it's a background upload.
    Check the **Albums → iPhone Backup** folder in the app afterward to
    confirm things arrived, or watch for the "keeping your Mac awake"
    notification, which confirms an upload is actively in progress.
