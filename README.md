@@ -13,6 +13,19 @@ entirely on the security of your Telegram account** — see the note in
 for how to actually use it day-to-day (Albums, sharing, Settings, and a
 troubleshooting section) once you're up and running.
 
+## About
+
+Cloud photo storage keeps getting more expensive, and most of it locks your
+own files behind someone else's subscription. BackitSnappy takes a different
+approach: it turns Telegram — a service you already have a free account
+on, with no meaningful storage cap — into your personal backup destination,
+with a real native Mac app on top instead of a chat interface. Your files
+live in private channels on *your own* Telegram account, not on a
+BackitSnappy server, so there's nothing centralized to shut down, get
+breached, or start charging for later.
+
+See it in more detail on the [landing page](https://prajwalankushrao8.github.io/BackitSnappy-site/).
+
 ## Setup
 
 **New here? See [SETUP.md](SETUP.md) for a full first-time walkthrough**,
