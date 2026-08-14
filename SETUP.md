@@ -157,7 +157,7 @@ Backup Album ID**.
 ### 7e. Import and set up the Shortcut
 
 1. On your iPhone, open the import link:
-   **https://www.icloud.com/shortcuts/b3be88afbd744f04af957115e89c9ca7**
+   **https://www.icloud.com/shortcuts/cf76c9d6cbb14d8da6297d0a95ff15be**
    and tap **Add Shortcut** in the Shortcuts app.
 2. **Before running it the first time, edit it** to fill in your own
    values — the imported Shortcut ships with placeholder text, not a live

@@ -76,7 +76,7 @@ without touching Tailscale at all.
    - **Pairing Token** — tap "Reveal" first, then "Copy."
    - **iPhone Backup Album ID** — the auto-created album your phone uploads
      land in; open it under the **Albums** tab to browse them.
-4. **Import the shortcut:** https://www.icloud.com/shortcuts/b3be88afbd744f04af957115e89c9ca7 —
+4. **Import the shortcut:** https://www.icloud.com/shortcuts/cf76c9d6cbb14d8da6297d0a95ff15be —
    tap **Add Shortcut**, then **edit it once** to paste your own Upload URL,
    Pairing Token, and Album ID into the placeholder fields (it ships with
    placeholder text, not a live prompt — see
