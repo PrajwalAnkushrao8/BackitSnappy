@@ -55,3 +55,16 @@ async def invite_link(album_id: int, manager: TelegramManager = Depends(get_mana
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"invite_link": link}
+
+
+@router.delete("/{album_id}")
+async def delete_album(album_id: int, manager: TelegramManager = Depends(get_manager)):
+    """Permanently destroys the album's Telegram channel and everything in
+    it -- irreversible, the frontend must confirm before calling this."""
+    try:
+        await manager.delete_album(album_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    return {"deleted": True}

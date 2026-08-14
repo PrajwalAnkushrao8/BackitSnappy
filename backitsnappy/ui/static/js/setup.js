@@ -38,6 +38,10 @@ function wireWizardStep(stepName, inputIds, submitFn) {
 }
 
 function initSetupWizard() {
+  document.getElementById('btn-open-telegram-api').addEventListener('click', () => {
+    window.pywebview.api.open_telegram_api_page();
+  });
+
   wireWizardStep('credentials', ['input-api-id', 'input-api-hash'], (apiId, apiHash) =>
     API.request('/api/setup/credentials', { method: 'POST', json: { api_id: Number(apiId), api_hash: apiHash } })
   );

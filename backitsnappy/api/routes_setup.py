@@ -63,3 +63,12 @@ async def submit_password(body: PasswordIn, manager: TelegramManager = Depends(g
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"state": state.value}
+
+
+@router.post("/logout")
+async def logout(manager: TelegramManager = Depends(get_manager)):
+    try:
+        state = await manager.logout()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"state": state.value}

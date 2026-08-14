@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
+from .. import db
 from ..telegram.client_manager import TelegramManager
 from .deps import get_manager
 
@@ -24,7 +25,12 @@ async def upload(
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    job_id = manager.start_upload(dest, album_id=album_id, source="api", delete_after=True)
+    # Durable from this point on -- if the app closes or crashes before this
+    # upload finishes, the row (and the temp file it points at) survives to
+    # be resumed on next launch. See client_manager._do_upload's finally
+    # block for where it gets cleaned up on success/failure.
+    queue_id = db.enqueue_upload(str(dest), file.filename, album_id, "api")
+    job_id = manager.start_upload(dest, album_id=album_id, source="api", delete_after=True, queue_id=queue_id)
     return {"job_id": job_id}
 
 

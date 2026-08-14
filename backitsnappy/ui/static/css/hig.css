@@ -81,30 +81,92 @@ html, body {
   font-family: var(--font-system);
   font-size: var(--text-body);
   color: var(--label-primary);
-  background: var(--bg-secondary);
+  /* A subtle gradient, not a flat fill, so glass panels have something to
+     catch light through -- flat backgrounds make backdrop-filter pointless. */
+  background: linear-gradient(160deg, #eef2fb 0%, #f5f2f8 45%, #fdf2ee 100%);
   -webkit-font-smoothing: antialiased;
   user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background: linear-gradient(160deg, #0d1420 0%, #15121c 45%, #1c1512 100%);
+  }
+}
+
+/* --- Liquid Glass materials (apple-hig-designer skill: references/liquid-glass.md) --- */
+.glass-material {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+.glass-material-thin {
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+@media (prefers-color-scheme: dark) {
+  .glass-material {
+    background: rgba(30, 30, 30, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .glass-material-thin {
+    background: rgba(30, 30, 30, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+}
+/* Solid fallback for browsers without backdrop-filter, or when the user
+   has asked for less transparency -- glass is decoration, not structure. */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-material, .glass-material-thin { background: var(--bg-secondary); border: 1px solid var(--separator); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-material, .glass-material-thin {
+    background: var(--bg-secondary);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid var(--separator);
+  }
 }
 
 #app { display: flex; height: 100vh; overflow: hidden; }
 .hidden { display: none !important; }
 
-/* --- Sidebar --- */
+/* --- Sidebar (Liquid Glass: thick material, light-catching edge only on
+   the side facing the content, not a floating-card border all around) --- */
 .sidebar {
   width: 220px;
   flex-shrink: 0;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--separator);
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  border-right: 1px solid rgba(255, 255, 255, 0.35);
   padding: var(--space-8) var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
 }
+@media (prefers-color-scheme: dark) {
+  .sidebar {
+    background: rgba(20, 20, 22, 0.55);
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .sidebar { background: var(--bg-secondary); border-right: 1px solid var(--separator); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .sidebar { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 .sidebar-title {
   font-size: var(--text-title3);
   font-weight: 700;
   padding: 0 var(--space-3) var(--space-4);
+  display: flex; align-items: center; gap: var(--space-2);
 }
+.sidebar-title .icon-svg { color: var(--system-blue); }
 .nav-item {
   display: flex;
   align-items: center;
@@ -119,7 +181,13 @@ html, body {
 }
 .nav-item:hover { background: var(--system-gray5); }
 .nav-item.selected { background: rgba(0, 122, 255, 0.15); color: var(--system-blue); }
-.nav-item .icon { width: 18px; text-align: center; }
+.nav-item .icon { width: 18px; text-align: center; display: flex; }
+
+/* Inline SVG icon set (see ICONS in app.js) -- currentColor lets every
+   usage site inherit its own color rules (nav selected state, white icons
+   over photo thumbnails, etc.) with no per-icon overrides needed. */
+.icon-svg { width: 18px; height: 18px; flex-shrink: 0; display: block; }
+.icon-svg-lg { width: 40px; height: 40px; }
 
 /* --- Main content --- */
 .main {
@@ -250,6 +318,59 @@ html, body {
 .upload-row-status { color: var(--label-secondary); }
 .upload-row-status.error { color: var(--system-red); }
 
+/* Bounded, scrollable "visible box" for in-progress uploads -- collapses to
+   nothing when idle (:empty), becomes a proper card once populated, so a
+   large batch scrolls inside a fixed-height panel instead of flooding the
+   page with dozens of unstyled rows. */
+#uploads-storage, #uploads-album {
+  margin: 0 0 var(--space-4);
+}
+/* #album-drilldown-view cancels .main's padding for the edge-to-edge grid
+   (see .album-grid) -- give this one its own small inset so a populated
+   box doesn't touch the true window edges. */
+#uploads-album:not(:empty) { margin: 0 var(--space-2) var(--space-4); }
+#uploads-storage:not(:empty), #uploads-album:not(:empty) {
+  max-height: 240px;
+  overflow-y: auto;
+  border-radius: var(--radius-lg);
+  background: var(--bg-tertiary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.upload-batch-summary {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-footnote);
+  font-weight: 700;
+  color: var(--label-primary);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--separator);
+}
+.upload-batch-summary-text { flex: 1; }
+.upload-pause-btn { min-height: 26px; padding: 0 var(--space-3); font-size: var(--text-caption1); }
+/* Row-corner "x" -- cancels a still-running upload/download, or dismisses
+   one that's already finished/failed. Position:relative + padding-right on
+   the row itself (see .upload-row / .download-row) reserve its spot. */
+.row-close-btn {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--system-gray5);
+  line-height: 1;
+}
+.row-close-btn:hover { background: var(--system-gray4); }
+.upload-row { position: relative; padding-right: calc(var(--space-4) + 22px); }
+
 /* --- Setup wizard --- */
 #setup-overlay {
   position: fixed; inset: 0;
@@ -266,7 +387,27 @@ html, body {
 }
 .wizard-title { font-size: var(--text-title2); font-weight: 700; margin: 0 0 var(--space-2); }
 .wizard-subtitle { font-size: var(--text-subhead); color: var(--label-secondary); margin: 0 0 var(--space-6); }
+.wizard-steps {
+  font-size: var(--text-footnote);
+  color: var(--label-secondary);
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+}
+.wizard-steps li { margin-bottom: var(--space-2); }
+.wizard-steps code { color: var(--label-primary); }
 .wizard-error { color: var(--system-red); font-size: var(--text-footnote); margin-top: var(--space-2); min-height: 16px; }
+
+/* --- First-run product tour -- same overlay/card pattern as the setup
+   wizard above, for visual consistency between the two onboarding flows. */
+#tour-overlay {
+  position: fixed; inset: 0;
+  background: var(--bg-secondary);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.tour-dots { display: flex; gap: var(--space-2); justify-content: center; margin: 0 0 var(--space-6); }
+.tour-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--system-gray4); }
+.tour-dot.active { background: var(--system-blue); }
 
 /* --- Invite link box --- */
 .invite-link-box {
@@ -275,6 +416,373 @@ html, body {
   padding: var(--space-2) var(--space-3); margin-top: var(--space-3);
   font-family: var(--font-mono); font-size: var(--text-caption1);
   word-break: break-all;
+}
+
+/* --- Gallery toolbar (glass) --- */
+.gallery-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
+}
+.gallery-toolbar-actions { display: flex; align-items: center; gap: var(--space-2); }
+.album-toolbar-actions { display: flex; align-items: center; gap: var(--space-2); }
+
+/* --- Gallery grid: date sections with sticky glass headers --- */
+.gallery-section { margin-bottom: var(--space-6); content-visibility: auto; contain-intrinsic-size: 0 400px; }
+.gallery-section-header {
+  position: sticky;
+  top: 68px;
+  z-index: 10;
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  color: var(--label-secondary);
+  margin-bottom: var(--space-2);
+}
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-2);
+}
+.gallery-cell {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--system-gray5);
+}
+/* -webkit-user-drag stops WebKit's native "drag this image out as a file"
+   behavior -- the HTML draggable="false" attribute alone only covers the
+   in-page HTML5 Drag and Drop API, not this separate OS-level mechanism,
+   which is what let dragging our own thumbnails back onto a drop target
+   re-trigger an upload. */
+.gallery-cell img { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-drag: none; user-select: none; }
+.gallery-cell.selected, .album-cell.selected { outline: 3px solid var(--system-blue); outline-offset: -3px; }
+.gallery-cell-badge {
+  position: absolute; bottom: var(--space-2); left: var(--space-2);
+  color: white; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.6));
+}
+.gallery-cell-badge .icon-svg { width: 16px; height: 16px; }
+.gallery-cell-overlay {
+  position: absolute; top: 0; right: 0;
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--space-1);
+  min-width: 32px; height: 32px; margin: var(--space-2);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-full);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-default);
+}
+.gallery-cell:hover .gallery-cell-overlay,
+.album-cell:hover .gallery-cell-overlay { opacity: 1; }
+.gallery-cell-icon-btn {
+  background: none; border: none; cursor: pointer;
+  color: white; display: flex; align-items: center; justify-content: center;
+}
+.gallery-cell-icon-btn .icon-svg { width: 16px; height: 16px; }
+.gallery-cell-checkbox {
+  position: absolute; top: var(--space-2); left: var(--space-2);
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  background: rgba(0,0,0,0.15);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-default);
+}
+.gallery-cell:hover .gallery-cell-checkbox,
+.album-cell:hover .gallery-cell-checkbox { opacity: 1; }
+.gallery-cell.selected .gallery-cell-checkbox,
+.album-cell.selected .gallery-cell-checkbox {
+  opacity: 1; background: var(--system-blue); border-color: var(--system-blue);
+}
+.gallery-cell-file {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-tertiary);
+}
+.gallery-cell-file-ext {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--system-gray5);
+  color: var(--label-secondary);
+  font-size: var(--text-caption1);
+  font-weight: 700;
+}
+.gallery-empty { color: var(--label-secondary); padding: var(--space-8) 0; text-align: center; }
+
+/* --- Downloads tray (glass, floating bottom-right) --- */
+#downloads-panel {
+  position: fixed;
+  bottom: var(--space-6);
+  right: var(--space-6);
+  width: 300px;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: var(--radius-lg);
+  z-index: 50;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+/* Fixed-width notification row -- a long filename must never grow the row
+   (or the fixed-width panel) wider, it just truncates with an ellipsis.
+   The cancel "x" is pinned to the corner so it's always in the same spot
+   regardless of filename length. */
+.download-row {
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  padding-right: calc(var(--space-4) + 22px);
+}
+.download-row + .download-row { border-top: 1px solid var(--separator); }
+.download-row-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+/* --- Lightbox (glass chrome over solid/transparent media -- per the
+   skill's own "don't glass photo/video viewing surfaces" guidance) --- */
+#lightbox-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox-topbar {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--space-4);
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+.lightbox-title { color: white; font-size: var(--text-subhead); font-weight: 600; }
+.lightbox-actions { display: flex; gap: var(--space-2); }
+.lightbox-media {
+  max-width: 90vw; max-height: 85vh;
+  display: flex; align-items: center; justify-content: center;
+}
+.lightbox-media img, .lightbox-media video {
+  max-width: 90vw; max-height: 85vh;
+  border-radius: var(--radius-md);
+}
+.lightbox-loading, .lightbox-error { color: white; font-size: var(--text-subhead); }
+.lightbox-error { color: var(--system-red); }
+.lightbox-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.15);
+  color: white;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.lightbox-nav .icon-svg { width: 22px; height: 22px; }
+.lightbox-nav:hover { background: rgba(255,255,255,0.25); }
+.lightbox-nav-prev { left: var(--space-6); }
+.lightbox-nav-next { right: var(--space-6); }
+
+/* --- Finder-style toolbar + breadcrumb (Albums tab) --- */
+.finder-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-6);
+}
+.breadcrumb { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-subhead); }
+.breadcrumb-item { color: var(--label-secondary); font-weight: 500; }
+.breadcrumb-item.active { color: var(--label-primary); font-weight: 700; }
+.breadcrumb-link { color: var(--system-blue); cursor: pointer; }
+.breadcrumb-link:hover { text-decoration: underline; }
+.breadcrumb-sep { color: var(--label-tertiary); }
+
+/* --- Finder-style folder grid (Albums top level) --- */
+.finder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-4);
+}
+.folder-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: center;
+  user-select: none;
+}
+.folder-cell:hover { background: rgba(255, 255, 255, 0.35); }
+@media (prefers-color-scheme: dark) {
+  .folder-cell:hover { background: rgba(255, 255, 255, 0.06); }
+}
+.folder-icon { font-size: 48px; line-height: 1; }
+.folder-name {
+  font-size: var(--text-footnote);
+  color: var(--label-primary);
+  word-break: break-word;
+  max-width: 100px;
+}
+
+/* --- Context menu (apple-hig-designer skill components.md, glass-ified) --- */
+.context-menu {
+  position: absolute;
+  z-index: 300;
+  border-radius: var(--radius-md);
+  min-width: 200px;
+  overflow: hidden;
+  padding: var(--space-1) 0;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+.context-menu-item {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-subhead);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.context-menu-item:hover { background: rgba(0, 122, 255, 0.12); }
+.context-menu-item.destructive { color: var(--system-red); }
+.context-menu-item.destructive:hover { background: rgba(255, 59, 48, 0.12); }
+
+/* --- Prompt modal (replaces window.prompt(), unsupported by pywebview's
+   WKWebView backend) -- same overlay treatment as #setup-overlay --- */
+#prompt-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 150;
+}
+
+/* --- Album drill-down: edge-to-edge Photos.app-style grid --- */
+#album-drilldown-view {
+  /* Cancel .main's horizontal padding so the grid reaches the true edges
+     of the content area, matching Photos.app's edge-to-edge look; the
+     floating toolbar/invite controls sit above it unaffected. */
+  margin: 0 calc(-1 * var(--space-10));
+}
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 2px;
+  padding: 0 var(--space-2);
+  min-height: 200px;
+  border-radius: var(--radius-lg);
+  transition: all var(--duration-fast) var(--ease-default);
+}
+/* Visible feedback for the whole grid while dragging a file over it --
+   the grid itself is the drop target, so this is the only "drop here" cue
+   once it's populated with photos. */
+.album-grid.dragover {
+  background: rgba(0, 122, 255, 0.08);
+  outline: 2px dashed var(--system-blue);
+  outline-offset: -2px;
+}
+/* Empty state: a clearly bounded, always-visible drop target -- without
+   this, an empty album gave no visual hint that dropping a file anywhere
+   would work. */
+.album-grid .gallery-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 200px;
+  margin: var(--space-2);
+  padding: var(--space-6);
+  border: 2px dashed var(--system-gray3);
+  border-radius: var(--radius-xl);
+  color: var(--label-secondary);
+  text-align: center;
+}
+.album-grid .gallery-empty .icon { font-size: 40px; color: var(--label-tertiary); }
+.album-cell {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--system-gray5);
+}
+.album-cell img { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-drag: none; user-select: none; }
+
+/* --- Floating invite control (bottom-right FAB + popover) --- */
+.invite-fab {
+  position: fixed;
+  bottom: calc(var(--space-6) + 70px);
+  right: var(--space-6);
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  z-index: 40;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  display: flex; align-items: center; justify-content: center;
+}
+.invite-fab .icon-svg { width: 22px; height: 22px; }
+.invite-fab:active { transform: scale(0.96); }
+.invite-popover {
+  position: fixed;
+  bottom: calc(var(--space-6) + 130px);
+  right: var(--space-6);
+  width: 260px;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  z-index: 40;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.invite-popover .field { margin-bottom: var(--space-3); }
+
+/* --- Sync toast: non-blocking, top-center, auto-dismissing --- */
+#sync-toast {
+  position: fixed;
+  top: var(--space-6);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 250;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-full);
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  max-width: 420px;
+  text-align: center;
+}
+#sync-toast.error { color: var(--system-red); }
+
+/* --- "Upload elsewhere" banner: shown in an album that isn't the one
+   actively uploading, in place of its (irrelevant) progress rows --- */
+#upload-elsewhere-banner {
+  margin: 0 var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  color: var(--system-blue);
+  text-align: center;
 }
 
 ::-webkit-scrollbar { width: 8px; }

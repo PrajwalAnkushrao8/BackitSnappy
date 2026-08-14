@@ -11,7 +11,16 @@
     <div class="wizard-card">
       <div id="wizard-step-credentials">
         <div class="wizard-title">Connect Telegram</div>
-        <div class="wizard-subtitle">Get your api_id and api_hash from my.telegram.org/apps</div>
+        <div class="wizard-subtitle">
+          A one-time step every Telegram app needs -- getting an api_id and api_hash from Telegram
+          itself.
+        </div>
+        <ol class="wizard-steps">
+          <li>Tap the button below and log in with your phone number.</li>
+          <li>Fill in "App title" and "Short name" with anything you like.</li>
+          <li>Copy the <code>api_id</code> and <code>api_hash</code> it shows you, then paste them in below.</li>
+        </ol>
+        <button class="btn btn-secondary btn-full" id="btn-open-telegram-api" style="margin-bottom: 16px;">Open my.telegram.org/apps</button>
         <div class="field">
           <label>API ID</label>
           <input type="text" id="input-api-id" inputmode="numeric" placeholder="1234567" />
@@ -37,7 +46,10 @@
 
       <div id="wizard-step-code" class="hidden">
         <div class="wizard-title">Enter code</div>
-        <div class="wizard-subtitle">Telegram sent you a login code</div>
+        <div class="wizard-subtitle">
+          Check the Telegram app itself (not a text message) -- it sends the login code as a
+          message from Telegram, usually to whichever device you're already signed in on.
+        </div>
         <div class="field">
           <label>Code</label>
           <input type="text" id="input-code" inputmode="numeric" placeholder="12345" />
@@ -59,60 +71,84 @@
     </div>
   </div>
 
+  <!-- Text-input modal (replaces window.prompt(), which pywebview's WKWebView
+       backend doesn't implement) -->
+  <div id="prompt-modal-overlay" class="hidden">
+    <div class="wizard-card">
+      <div class="wizard-title" id="prompt-modal-title">New Album</div>
+      <div class="field">
+        <input type="text" id="prompt-modal-input" placeholder="Name" />
+      </div>
+      <div style="display:flex; gap: 8px;">
+        <button class="btn btn-secondary" id="prompt-modal-cancel" style="flex:1;">Cancel</button>
+        <button class="btn btn-primary" id="prompt-modal-confirm" style="flex:1;">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- First-run product tour (skippable, replayable from Settings) -->
+  <div id="tour-overlay" class="hidden">
+    <div class="wizard-card">
+      <div class="wizard-title" id="tour-title"></div>
+      <div class="wizard-subtitle" id="tour-body"></div>
+      <div class="tour-dots" id="tour-dots"></div>
+      <div style="display:flex; gap: 8px;">
+        <button class="btn btn-secondary" id="btn-tour-skip" style="flex:1;">Skip</button>
+        <button class="btn btn-primary" id="btn-tour-next" style="flex:1;">Next</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Main app -->
   <div id="app" class="hidden">
     <div class="sidebar">
-      <div class="sidebar-title">BackitSnappy</div>
-      <div class="nav-item selected" data-view="storage"><span class="icon">🗂</span>Storage</div>
-      <div class="nav-item" data-view="albums"><span class="icon">🖼</span>Albums</div>
-      <div class="nav-item" data-view="settings"><span class="icon">⚙</span>Settings</div>
+      <div class="sidebar-title">
+        <svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="6.7" cy="10" r="3.5" stroke="currentColor" stroke-width="1.5"/><circle cx="13.3" cy="10" r="3.5" stroke="currentColor" stroke-width="1.5"/></svg>
+        BackitSnappy
+      </div>
+      <div class="nav-item selected" data-view="albums"><span class="icon"><svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="3" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7v8a2 2 0 0 0 2 2h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>Albums</div>
+      <div class="nav-item" data-view="settings"><span class="icon"><svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.36 4.64l-1.41 1.41M6.05 13.95l-1.41 1.41M15.36 15.36l-1.41-1.41M6.05 6.05L4.64 4.64" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>Settings</div>
     </div>
 
     <div class="main">
-      <!-- Storage view -->
-      <div id="view-storage" class="view">
-        <div class="page-title">Storage</div>
-        <div class="dropzone" id="dropzone-storage">
-          <div class="icon">⬆︎</div>
-          <div>Drag files here to back them up, or <span style="color: var(--system-blue); cursor: pointer;" id="btn-browse-storage">choose files</span></div>
-          <input type="file" id="file-input-storage" multiple class="hidden" />
-        </div>
-        <div id="uploads-storage"></div>
-        <div class="section-header">Files</div>
-        <div class="list" id="file-list-storage"></div>
-      </div>
-
       <!-- Albums view -->
-      <div id="view-albums" class="view hidden">
-        <div class="page-title">Albums</div>
-        <div class="field" style="display:flex; gap: 8px; align-items: flex-end;">
-          <div style="flex:1;">
-            <label>New album name</label>
-            <input type="text" id="input-album-name" placeholder="Summer 2026" />
+      <div id="view-albums" class="view">
+        <div class="finder-toolbar glass-material-thin">
+          <div class="breadcrumb" id="albums-breadcrumb"></div>
+          <button class="btn btn-primary" id="btn-new-folder">+ New Folder</button>
+          <div class="album-toolbar-actions hidden" id="album-toolbar-actions">
+            <button class="btn btn-secondary hidden" id="album-btn-select-all">Select All</button>
+            <button class="btn btn-primary hidden" id="album-btn-download-selected" disabled>Download 0</button>
+            <button class="btn btn-destructive hidden" id="album-btn-delete-selected" disabled>Delete 0</button>
+            <button class="btn btn-secondary" id="album-btn-select-mode">Select</button>
+            <button class="btn btn-primary" id="btn-add-photos" title="Add photos">+</button>
           </div>
-          <button class="btn btn-primary" id="btn-create-album">Create</button>
         </div>
-        <div class="section-header">Your albums</div>
-        <div class="list" id="album-list"></div>
 
-        <div id="album-detail" class="hidden">
-          <div class="section-header" id="album-detail-title"></div>
-          <div class="dropzone" id="dropzone-album">
-            <div class="icon">⬆︎</div>
-            <div>Drag files here to add to this album, or <span style="color: var(--system-blue); cursor: pointer;" id="btn-browse-album">choose files</span></div>
-            <input type="file" id="file-input-album" multiple class="hidden" />
-          </div>
+        <!-- Top level: albums as folder icons -->
+        <div id="albums-grid-view">
+          <div class="finder-grid" id="albums-folder-grid"></div>
+        </div>
+
+        <!-- Drill-down: one album's contents, Photos.app style -- just the
+             grid, no visible dropzone/filter/select chrome. Uploading
+             happens via drag-and-drop straight onto the grid, or the "+"
+             toolbar button above (both wired in album-gallery.js). -->
+        <div id="album-drilldown-view" class="hidden">
           <div id="uploads-album"></div>
-          <div class="field" style="display:flex; gap: 8px; align-items: flex-end;">
-            <div style="flex:1;">
+          <div id="upload-elsewhere-banner" class="hidden glass-material-thin"></div>
+          <div class="album-grid" id="album-gallery-grid"></div>
+          <input type="file" id="file-input-album" multiple class="hidden" />
+
+          <button class="invite-fab glass-material" id="invite-fab" title="Invite by username"><svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 17c.6-3 2.8-5 5.5-5s4.9 2 5.5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M15.5 5.5v5M13 8h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          <div class="invite-popover glass-material hidden" id="invite-popover">
+            <div class="field">
               <label>Invite by username</label>
               <input type="text" id="input-invite-username" placeholder="@friend" />
             </div>
-            <button class="btn btn-secondary" id="btn-invite">Invite</button>
+            <button class="btn btn-secondary btn-full" id="btn-invite">Invite</button>
+            <div id="invite-result"></div>
           </div>
-          <div id="invite-result"></div>
-          <div class="section-header">Files</div>
-          <div class="list" id="file-list-album"></div>
         </div>
       </div>
 
@@ -139,21 +175,98 @@
           <div class="toggle-track" id="toggle-tailscale"><div class="toggle-thumb"></div></div>
         </div>
 
-        <div class="section-header">iOS Shortcut pairing</div>
+        <div class="section-header">iOS Shortcut setup</div>
         <div class="card" style="padding: 16px;">
-          <div class="list-row-subtitle" style="margin-bottom: 8px;">Use this token as the <code>X-Pairing-Token</code> header in your iOS Shortcut's upload request.</div>
+          <div class="list-row-subtitle" style="margin-bottom: 12px;">
+            Paste these three values into your iPhone Shortcut the first time it asks -- it remembers
+            them after that.
+          </div>
+
+          <div class="list-row-title" style="margin-bottom:4px;">Upload URL</div>
+          <div class="invite-link-box" id="tailscale-url-box">Checking&hellip;</div>
+          <div style="margin-top: 8px; margin-bottom: 16px; display:flex; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-copy-tailscale-url">Copy</button>
+            <button class="btn btn-secondary" id="btn-refresh-tailscale-url">Refresh</button>
+          </div>
+
+          <div class="list-row-title" style="margin-bottom:4px;">Pairing Token</div>
+          <div class="list-row-subtitle" style="margin-bottom: 8px;">Sent as the <code>X-Pairing-Token</code> header.</div>
           <div class="invite-link-box" id="pairing-token-box">••••••••••••••••••••••••</div>
-          <div style="margin-top: 8px; display:flex; gap: 8px;">
+          <div style="margin-top: 8px; margin-bottom: 16px; display:flex; gap: 8px;">
             <button class="btn btn-secondary" id="btn-reveal-token">Reveal</button>
+            <button class="btn btn-secondary" id="btn-copy-token">Copy</button>
             <button class="btn btn-destructive" id="btn-rotate-token">Rotate token</button>
           </div>
+
+          <div class="list-row-title" style="margin-bottom:4px;">iPhone Backup Album ID</div>
+          <div class="list-row-subtitle" style="margin-bottom: 8px;">Sent as the <code>album_id</code> form field so uploads land in a browsable album.</div>
+          <div class="invite-link-box" id="iphone-album-id-box">&mdash;</div>
+          <div style="margin-top: 8px; display:flex; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-copy-album-id">Copy</button>
+          </div>
+        </div>
+
+        <div class="section-header">Sync</div>
+        <div class="card" style="padding: 16px;">
+          <div class="list-row-subtitle" style="margin-bottom: 8px;">
+            If you add or delete photos directly in Telegram (not through this app), the local
+            index won't know until you sync -- this checks every channel against Telegram, removes
+            anything no longer there, and imports anything new. Importing downloads each new file
+            to generate a thumbnail, so this can take a while if there's a lot to bring in.
+          </div>
+          <button class="btn btn-secondary" id="btn-sync">Sync with Telegram</button>
+          <div class="list-row-subtitle" id="sync-result" style="margin-top: 8px;"></div>
+        </div>
+
+        <div class="section-header">Help</div>
+        <div class="card" style="padding: 16px; display:flex; flex-direction: column; gap: 8px;">
+          <button class="btn btn-secondary" id="btn-replay-tour">Replay welcome tour</button>
+          <button class="btn btn-secondary" id="btn-help-open-telegram-api">Open my.telegram.org/apps</button>
+        </div>
+
+        <div class="section-header">Account</div>
+        <div class="card" style="padding: 16px;">
+          <div class="list-row-subtitle" style="margin-bottom: 8px;">
+            Signs this Mac out of Telegram and clears the local index. Nothing in Telegram itself is
+            touched -- signing back into an account that had BackitSnappy content brings it all back
+            automatically.
+          </div>
+          <button class="btn btn-destructive" id="btn-logout">Log Out</button>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- Downloads tray -- top-level (not inside any one tab's view) so it
+       stays visible regardless of which tab is active; a download started
+       from Albums must still show progress if the user switches to Storage
+       (or vice versa) while it's running. -->
+  <div id="downloads-panel" class="hidden"></div>
+
+  <!-- Sync toast -- non-blocking notification for app-launch auto-sync and
+       after small deletes; also top-level for the same reason as above. -->
+  <div id="sync-toast" class="hidden glass-material"></div>
+
+  <!-- Lightbox -->
+  <div id="lightbox-overlay" class="hidden">
+    <div class="lightbox-topbar glass-material">
+      <div id="lightbox-title" class="lightbox-title"></div>
+      <div class="lightbox-actions">
+        <button class="btn btn-secondary" id="btn-lightbox-download">Download</button>
+        <button class="btn btn-secondary" id="btn-lightbox-save-as">Save As&hellip;</button>
+        <button class="btn btn-destructive hidden" id="btn-lightbox-delete">Delete</button>
+        <button class="btn btn-secondary" id="btn-lightbox-close">Close</button>
+      </div>
+    </div>
+    <button class="lightbox-nav lightbox-nav-prev" id="btn-lightbox-prev"><svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 5 7.5 10l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button class="lightbox-nav lightbox-nav-next" id="btn-lightbox-next"><svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 5 12.5 10l-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div id="lightbox-media" class="lightbox-media"></div>
+  </div>
+
   <script src="/js/setup.js"></script>
   <script src="/js/albums.js"></script>
+  <script src="/js/album-gallery.js"></script>
+  <script src="/js/tour.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

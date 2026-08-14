@@ -50,6 +50,20 @@ CREATE TABLE IF NOT EXISTS album_members (
     invited_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_album_members_album ON album_members(album_id);
+
+-- A row exists here from the moment an upload is accepted (temp file
+-- saved) until it reaches a terminal state (done or error) -- if the app
+-- is closed or crashes in between, rows still present on next launch mean
+-- "resume this," since their temp file is durable on disk regardless of
+-- process lifetime.
+CREATE TABLE IF NOT EXISTS upload_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    temp_path TEXT NOT NULL,
+    original_filename TEXT NOT NULL,
+    album_id INTEGER REFERENCES albums(id),
+    source TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -138,6 +152,22 @@ def get_file(file_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
 
 
+def delete_file(file_id: int) -> None:
+    conn = get_connection()
+    with _write_lock:
+        conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+        conn.commit()
+
+
+def get_files_by_channel(channel_id: int) -> list[sqlite3.Row]:
+    """All indexed files claiming to live in a given Telegram channel --
+    used to reconcile the local index against what's actually still there."""
+    conn = get_connection()
+    return conn.execute(
+        "SELECT id, telegram_message_id FROM files WHERE channel_id = ?", (channel_id,)
+    ).fetchall()
+
+
 def list_files(album_id: int | None = None) -> list[sqlite3.Row]:
     """Files in one place: the storage channel (album_id=None) or a specific
     album — mirrors get_file_by_hash_and_album's semantics."""
@@ -165,6 +195,22 @@ def insert_album(name: str, telegram_channel_id: int) -> int:
         return cur.lastrowid
 
 
+def wipe_local_index() -> None:
+    """Clears every locally-indexed record (files, albums, membership, and
+    any in-flight upload queue rows) without touching Telegram itself.
+    Used on logout -- a different (or freshly reconnected) account would
+    otherwise see stale rows pointing at channels it can't resolve.
+    Rebuilt automatically on next login by discovering the account's own
+    pre-existing BackitSnappy channels, if any."""
+    conn = get_connection()
+    with _write_lock:
+        conn.execute("DELETE FROM upload_queue")
+        conn.execute("DELETE FROM album_members")
+        conn.execute("DELETE FROM files")
+        conn.execute("DELETE FROM albums")
+        conn.commit()
+
+
 def get_album(album_id: int) -> sqlite3.Row | None:
     conn = get_connection()
     return conn.execute("SELECT * FROM albums WHERE id = ?", (album_id,)).fetchone()
@@ -180,6 +226,18 @@ def get_album_by_channel(channel_id: int) -> sqlite3.Row | None:
 def list_albums() -> list[sqlite3.Row]:
     conn = get_connection()
     return conn.execute("SELECT * FROM albums ORDER BY created_at DESC").fetchall()
+
+
+def delete_album(album_id: int) -> None:
+    """Cascade-delete an album's files and members, then the album itself.
+    SQLite here has no ON DELETE CASCADE configured, so this is done
+    explicitly, atomically (one locked block, one commit)."""
+    conn = get_connection()
+    with _write_lock:
+        conn.execute("DELETE FROM files WHERE album_id = ?", (album_id,))
+        conn.execute("DELETE FROM album_members WHERE album_id = ?", (album_id,))
+        conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+        conn.commit()
 
 
 # --- album members ---------------------------------------------------------
@@ -201,3 +259,29 @@ def list_album_members(album_id: int) -> list[sqlite3.Row]:
         "SELECT * FROM album_members WHERE album_id = ? ORDER BY invited_at",
         (album_id,),
     ).fetchall()
+
+
+# --- upload queue (crash/restart resume) ------------------------------------
+
+def enqueue_upload(temp_path: str, original_filename: str, album_id: int | None, source: str) -> int:
+    conn = get_connection()
+    with _write_lock:
+        cur = conn.execute(
+            "INSERT INTO upload_queue (temp_path, original_filename, album_id, source, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (temp_path, original_filename, album_id, source, time.time()),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def dequeue_upload(queue_id: int) -> None:
+    conn = get_connection()
+    with _write_lock:
+        conn.execute("DELETE FROM upload_queue WHERE id = ?", (queue_id,))
+        conn.commit()
+
+
+def get_pending_uploads() -> list[sqlite3.Row]:
+    conn = get_connection()
+    return conn.execute("SELECT * FROM upload_queue ORDER BY created_at").fetchall()

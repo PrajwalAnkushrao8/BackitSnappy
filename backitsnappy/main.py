@@ -8,9 +8,13 @@ servers and disconnects Telethon before the process exits.
 import asyncio
 import logging
 import threading
+from pathlib import Path
 
-from . import config, db
+import pillow_heif
+
+from . import config, db, keepawake
 from .api.server import create_app, run_servers
+from .telegram.auth_flow import AuthState
 from .telegram.client_manager import TelegramManager
 from .ui.window import create_window
 from .ui.window import start as start_webview
@@ -18,6 +22,24 @@ from .watcher.folder_watcher import WatcherController
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+pillow_heif.register_heif_opener()  # so Pillow can thumbnail iPhone HEIC photos
+
+
+def _resume_pending_uploads(manager: TelegramManager) -> None:
+    """Anything still in upload_queue means the app closed or crashed
+    before that upload reached a terminal state last session -- pick up
+    where it left off rather than losing track of it silently."""
+    for row in db.get_pending_uploads():
+        temp_path = Path(row["temp_path"])
+        if not temp_path.exists():
+            logger.warning("Queued upload %s is missing on disk, dropping it", temp_path)
+            db.dequeue_upload(row["id"])
+            continue
+        logger.info("Resuming interrupted upload: %s", temp_path)
+        manager.start_upload(
+            temp_path, album_id=row["album_id"], source=row["source"], delete_after=True, queue_id=row["id"],
+        )
 
 
 def _run_background(
@@ -31,6 +53,8 @@ def _run_background(
         db.init_db()
         manager = TelegramManager(loop)
         await manager.start()
+        if manager.state == AuthState.AUTHORIZED:
+            _resume_pending_uploads(manager)
 
         app = create_app(manager)
 
@@ -52,6 +76,7 @@ def _run_background(
         await run_servers(app, stop_event, on_local_ready=local_ready.set)
 
         watcher_controller.stop()
+        await keepawake.shutdown()
         await manager.disconnect()
 
     loop.run_until_complete(_main())

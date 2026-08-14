@@ -3,9 +3,14 @@
 Two `uvicorn.Server` instances share one FastAPI `app`: one always bound to
 127.0.0.1 for the local UI, and one — only started if the user has opted in
 via Settings — bound to the discovered Tailscale IP for iPhone Shortcuts
-uploads. Neither ever binds 0.0.0.0. Every /api/* route requires a valid
-X-Pairing-Token header (enforced app-wide below); only the static UI shell
-is unauthenticated, since it contains no secrets.
+uploads. Neither ever binds 0.0.0.0.
+
+Auth is applied per-router rather than app-wide: most /api/* routes require
+a valid X-Pairing-Token header (verify_pairing_token). The two media-serving
+routes (thumbnail/full media) additionally accept the token as a ?token=
+query param (verify_pairing_token_flexible), since browsers can't attach
+custom headers to <img>/<video> src requests — see api/deps.py. The static
+UI shell is unauthenticated, since it contains no secrets.
 """
 import asyncio
 import logging
@@ -18,8 +23,8 @@ from fastapi.staticfiles import StaticFiles
 from .. import config
 from ..network import tailscale
 from ..telegram.client_manager import TelegramManager
-from . import routes_albums, routes_files, routes_settings, routes_setup, routes_upload
-from .deps import verify_pairing_token
+from . import routes_albums, routes_files, routes_media, routes_settings, routes_setup, routes_upload
+from .deps import verify_pairing_token, verify_pairing_token_flexible
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +40,19 @@ class _Server(uvicorn.Server):
 
 
 def create_app(manager: TelegramManager) -> FastAPI:
-    app = FastAPI(title="BackitSnappy", dependencies=[Depends(verify_pairing_token)])
+    app = FastAPI(title="BackitSnappy")
     app.state.telegram_manager = manager
 
-    app.include_router(routes_setup.router, prefix="/api/setup", tags=["setup"])
-    app.include_router(routes_upload.router, prefix="/api", tags=["upload"])
-    app.include_router(routes_albums.router, prefix="/api/albums", tags=["albums"])
-    app.include_router(routes_files.router, prefix="/api/files", tags=["files"])
-    app.include_router(routes_settings.router, prefix="/api/settings", tags=["settings"])
+    strict = [Depends(verify_pairing_token)]
+    app.include_router(routes_setup.router, prefix="/api/setup", tags=["setup"], dependencies=strict)
+    app.include_router(routes_upload.router, prefix="/api", tags=["upload"], dependencies=strict)
+    app.include_router(routes_albums.router, prefix="/api/albums", tags=["albums"], dependencies=strict)
+    app.include_router(routes_files.router, prefix="/api/files", tags=["files"], dependencies=strict)
+    app.include_router(routes_settings.router, prefix="/api/settings", tags=["settings"], dependencies=strict)
+    app.include_router(
+        routes_media.router, prefix="/api/files", tags=["media"],
+        dependencies=[Depends(verify_pairing_token_flexible)],
+    )
 
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
     return app

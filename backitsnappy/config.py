@@ -15,8 +15,10 @@ DEFAULTS = {
     "local_port": 8765,
     "tailscale_port": 8766,
     "storage_channel_id": None,
+    "iphone_backup_album_id": None,
     "watch_folder": None,
     "tailscale_access_enabled": False,
+    "onboarding_completed": False,
 }
 
 _lock = threading.Lock()

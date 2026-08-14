@@ -1,8 +1,50 @@
-// Shared API client + app bootstrap/navigation. Loaded after setup.js and
-// albums.js, but those only *reference* API/refreshFileList etc. from inside
-// event handlers that fire later, so load order doesn't matter here.
+// Shared API client + app bootstrap/navigation, plus the shared lightbox
+// chrome (one overlay in the DOM, used by album-gallery.js -- previously
+// also by gallery.js/Storage before that tab was removed). Loaded after
+// setup.js, albums.js and album-gallery.js, but those only *reference*
+// API/escapeHTML/LIGHTBOX_OWNER/closeLightbox/etc. from inside event
+// handlers that fire later, so load order doesn't matter here.
 
 let PAIRING_TOKEN = null;
+let LIGHTBOX_OWNER = null; // whichever gallery module currently owns the open lightbox
+
+// Inline SVG icon set, monochrome via currentColor so each usage site's own
+// color rules (nav selected state, white icons over photo thumbnails, etc.)
+// apply automatically with no extra CSS. Replaces the emoji glyphs the UI
+// started with -- consistent stroke weight reads as a native, considered
+// icon set rather than a grab-bag of platform emoji renderings.
+const ICONS = {
+  albums: '<svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="3" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 7v8a2 2 0 0 0 2 2h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  settings: '<svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.36 4.64l-1.41 1.41M6.05 13.95l-1.41 1.41M15.36 15.36l-1.41-1.41M6.05 6.05L4.64 4.64" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  folder: '<svg class="icon-svg icon-svg-lg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 5.5a1.5 1.5 0 0 1 1.5-1.5h3.6a1.5 1.5 0 0 1 1.2.6l.9 1.2a1.5 1.5 0 0 0 1.2.6h4.1A1.5 1.5 0 0 1 17 8v6.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5v-9Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  iphone: '<svg class="icon-svg icon-svg-lg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="2" width="8" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M9 15.5h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  invite: '<svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 17c.6-3 2.8-5 5.5-5s4.9 2 5.5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M15.5 5.5v5M13 8h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  download: '<svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 3v9m0 0-3.5-3.5M10 12l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 14.5v1a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  trash: '<svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6h12M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6M6 6v9a1.5 1.5 0 0 0 1.5 1.5h5A1.5 1.5 0 0 0 14 15V6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 9v4M11.5 9v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  play: '<svg class="icon-svg" viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 4.8c0-1 1.1-1.6 2-1.1l7 4.2c.9.5.9 1.8 0 2.3l-7 4.2c-.9.5-2-.1-2-1.1V4.8Z"/></svg>',
+  chevronLeft: '<svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.5 5 7.5 10l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  chevronRight: '<svg class="icon-svg" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.5 5 12.5 10l-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+
+// FastAPI's error body is `{ detail: "..." }` for our own HTTPExceptions,
+// but `{ detail: [{loc, msg, type}, ...] }` (a list, not a string) for
+// Pydantic/param validation failures (422s). Passing that list straight to
+// `new Error(detail)` silently stringifies it to "[object Object]" instead
+// of throwing -- this always extracts an actual readable string.
+async function extractErrorDetail(res) {
+  let detail = res.statusText;
+  try {
+    const body = await res.json();
+    if (typeof body.detail === 'string') {
+      detail = body.detail;
+    } else if (Array.isArray(body.detail)) {
+      detail = body.detail.map((d) => d.msg || JSON.stringify(d)).join('; ') || detail;
+    } else if (body.detail) {
+      detail = JSON.stringify(body.detail);
+    }
+  } catch (e) { /* no body, or not JSON */ }
+  return detail;
+}
 
 const API = {
   async request(path, opts = {}) {
@@ -15,9 +57,7 @@ const API = {
     }
     const res = await fetch(path, { method: opts.method || 'GET', headers, body });
     if (!res.ok) {
-      let detail = res.statusText;
-      try { detail = (await res.json()).detail || detail; } catch (e) { /* no body */ }
-      throw new Error(detail);
+      throw new Error(await extractErrorDetail(res));
     }
     if (res.status === 204) return null;
     return res.json();
@@ -33,9 +73,7 @@ const API = {
     if (PAIRING_TOKEN) headers['X-Pairing-Token'] = PAIRING_TOKEN;
     const res = await fetch(path, { method: 'POST', headers, body: form });
     if (!res.ok) {
-      let detail = res.statusText;
-      try { detail = (await res.json()).detail || detail; } catch (e) { /* no body */ }
-      throw new Error(detail);
+      throw new Error(await extractErrorDetail(res));
     }
     return res.json();
   },
@@ -50,15 +88,47 @@ function formatBytes(bytes) {
   return `${val.toFixed(1)} ${units[unit]}`;
 }
 
-function fileListRowHTML(file) {
-  const date = new Date(file.uploaded_at * 1000).toLocaleString();
-  return `
-    <div class="list-row">
-      <div style="flex:1;">
-        <div class="list-row-title">${escapeHTML(file.filename)}</div>
-        <div class="list-row-subtitle">${formatBytes(file.size)} &middot; ${date} &middot; ${file.source}</div>
-      </div>
-    </div>`;
+function formatSyncResult(result) {
+  const parts = [];
+  if (result.added > 0) parts.push(`imported ${result.added} new file${result.added === 1 ? '' : 's'}`);
+  if (result.removed > 0) parts.push(`removed ${result.removed} stale entr${result.removed === 1 ? 'y' : 'ies'}`);
+  const channelsNote = `${result.channels_checked} channel${result.channels_checked === 1 ? '' : 's'} checked`;
+  return parts.length ? `${parts.join(', ')} (${channelsNote}).` : `Everything's already in sync (${channelsNote}).`;
+}
+
+let syncToastHideTimer = null;
+function showSyncToast(message, { autoHide = false, isError = false } = {}) {
+  const toast = document.getElementById('sync-toast');
+  if (!toast) return;
+  clearTimeout(syncToastHideTimer);
+  toast.textContent = message;
+  toast.classList.remove('hidden');
+  toast.classList.toggle('error', !!isError);
+  if (autoHide) {
+    syncToastHideTimer = setTimeout(() => toast.classList.add('hidden'), 4000);
+  }
+}
+
+// Shared by the manual "Sync with Telegram" button (Settings) and every
+// automatic trigger (app launch, after a small delete) -- toast:true shows
+// a lightweight non-blocking notification instead of writing into the
+// (possibly not currently visible) Settings page.
+async function runSync({ toast = false } = {}) {
+  const resultEl = document.getElementById('sync-result');
+  if (toast) showSyncToast('Syncing with Telegram…');
+  else if (resultEl) resultEl.textContent = 'Syncing…';
+  try {
+    const result = await API.request('/api/settings/sync', { method: 'POST' });
+    const message = formatSyncResult(result);
+    if (toast) showSyncToast(message, { autoHide: true });
+    if (resultEl) resultEl.textContent = message;
+    refreshAlbumGallery();
+    return result;
+  } catch (e) {
+    if (toast) showSyncToast(e.message, { autoHide: true, isError: true });
+    if (resultEl) resultEl.textContent = e.message;
+    return null;
+  }
 }
 
 function escapeHTML(str) {
@@ -67,17 +137,74 @@ function escapeHTML(str) {
   return div.innerHTML;
 }
 
-async function refreshFileList(albumId, containerEl) {
-  const url = albumId ? `/api/files?album_id=${albumId}` : '/api/files';
-  const files = await API.request(url);
-  containerEl.innerHTML = files.length
-    ? files.map(fileListRowHTML).join('')
-    : '<div class="list-row"><div class="list-row-subtitle">No files yet</div></div>';
+// Right-click context menu. items: [{ label, action, destructive? }]
+function showContextMenu(x, y, items) {
+  document.querySelectorAll('.context-menu').forEach((m) => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'context-menu glass-material';
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  items.forEach((item) => {
+    const el = document.createElement('div');
+    el.className = `context-menu-item${item.destructive ? ' destructive' : ''}`;
+    el.textContent = item.label;
+    el.addEventListener('click', () => {
+      menu.remove();
+      item.action();
+    });
+    menu.appendChild(el);
+  });
+  document.body.appendChild(menu);
+  const dismiss = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove();
+      document.removeEventListener('click', dismiss);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', dismiss), 0);
+}
+
+// Text-input modal, replacing window.prompt() -- pywebview's WKWebView
+// backend implements the alert/confirm JS-dialog delegates but not the
+// text-input one, so prompt() just returns null immediately with no UI.
+// Resolves to the trimmed string, or null if cancelled/left empty.
+function showPromptModal(title, placeholder = '') {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('prompt-modal-overlay');
+    const titleEl = document.getElementById('prompt-modal-title');
+    const input = document.getElementById('prompt-modal-input');
+    const confirmBtn = document.getElementById('prompt-modal-confirm');
+    const cancelBtn = document.getElementById('prompt-modal-cancel');
+
+    titleEl.textContent = title;
+    input.value = '';
+    input.placeholder = placeholder;
+    overlay.classList.remove('hidden');
+    setTimeout(() => input.focus(), 0);
+
+    function cleanup(value) {
+      overlay.classList.add('hidden');
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+      input.removeEventListener('keydown', onKeydown);
+      resolve(value);
+    }
+    function onConfirm() { cleanup(input.value.trim() || null); }
+    function onCancel() { cleanup(null); }
+    function onKeydown(e) {
+      if (e.key === 'Enter') onConfirm();
+      if (e.key === 'Escape') onCancel();
+    }
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+    input.addEventListener('keydown', onKeydown);
+  });
 }
 
 function uploadRowHTML(jobId, filename) {
   return `
     <div class="upload-row" id="upload-row-${jobId}">
+      <button class="row-close-btn hidden" id="upload-dismiss-${jobId}" title="Dismiss" aria-label="Dismiss">&times;</button>
       <div class="upload-row-top">
         <span>${escapeHTML(filename)}</span>
         <span class="upload-row-status" id="upload-status-${jobId}">Starting&hellip;</span>
@@ -86,33 +213,68 @@ function uploadRowHTML(jobId, filename) {
     </div>`;
 }
 
-async function pollUploadProgress(jobId, onDone) {
-  const statusEl = document.getElementById(`upload-status-${jobId}`);
-  const fillEl = document.getElementById(`upload-fill-${jobId}`);
-  const tick = async () => {
-    let job;
-    try {
-      job = await API.request(`/api/upload/${jobId}/progress`);
-    } catch (e) {
-      if (statusEl) { statusEl.textContent = e.message; statusEl.classList.add('error'); }
-      return;
-    }
-    if (fillEl) fillEl.style.width = `${job.percent || 0}%`;
-    if (statusEl) statusEl.textContent = job.status;
-    if (job.status === 'error') {
-      if (statusEl) { statusEl.textContent = job.error || 'Failed'; statusEl.classList.add('error'); }
-      return;
-    }
-    if (job.status === 'done') {
-      onDone();
-      return;
-    }
-    setTimeout(tick, 700);
-  };
-  tick();
+// A failed upload row stays put (unlike a successful one, which
+// auto-clears) until the user dismisses it -- large batches can leave
+// several of these behind and nobody wants them piling up forever with no
+// way to clear them.
+function showUploadDismissBtn(id) {
+  const btn = document.getElementById(`upload-dismiss-${id}`);
+  if (!btn) return;
+  btn.classList.remove('hidden');
+  btn.addEventListener('click', () => document.getElementById(`upload-row-${id}`)?.remove());
 }
 
-function handleUpload(file, albumId, uploadsContainerEl, fileListEl) {
+// Generic job-progress poller: resolves with the final job on "done",
+// rejects with an Error on "error" or a request failure. onTick is called
+// with each intermediate job status. Shared by upload progress (below) and
+// download/prepare progress (gallery.js).
+function pollJobProgress(url, onTick) {
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      let job;
+      try {
+        job = await API.request(url);
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      if (onTick) onTick(job);
+      if (job.status === 'error') {
+        reject(new Error(job.error || 'Failed'));
+        return;
+      }
+      if (job.status === 'done') {
+        resolve(job);
+        return;
+      }
+      setTimeout(tick, 700);
+    };
+    tick();
+  });
+}
+
+// onSettled fires exactly once per file, on success OR failure -- required
+// so a batch queue (queueBatchUpload) can advance past a failed file
+// instead of stalling forever waiting for a slot that never frees up.
+function pollUploadProgress(jobId, onSettled) {
+  const statusEl = document.getElementById(`upload-status-${jobId}`);
+  const fillEl = document.getElementById(`upload-fill-${jobId}`);
+  pollJobProgress(`/api/upload/${jobId}/progress`, (job) => {
+    if (fillEl) fillEl.style.width = `${job.percent || 0}%`;
+    if (statusEl) statusEl.textContent = job.status;
+  })
+    .then(() => {
+      if (statusEl) statusEl.textContent = 'Done';
+      setTimeout(() => document.getElementById(`upload-row-${jobId}`)?.remove(), 3000);
+    })
+    .catch((e) => {
+      if (statusEl) { statusEl.textContent = e.message; statusEl.classList.add('error'); }
+      showUploadDismissBtn(jobId);
+    })
+    .finally(() => { if (onSettled) onSettled(); });
+}
+
+function handleUpload(file, albumId, uploadsContainerEl, onSettled) {
   const rowId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   uploadsContainerEl.insertAdjacentHTML('afterbegin', uploadRowHTML(rowId, file.name));
   API.upload('/api/upload', file, { album_id: albumId })
@@ -120,37 +282,200 @@ function handleUpload(file, albumId, uploadsContainerEl, fileListEl) {
       document.getElementById(`upload-row-${rowId}`).id = `upload-row-${job_id}`;
       document.getElementById(`upload-status-${rowId}`).id = `upload-status-${job_id}`;
       document.getElementById(`upload-fill-${rowId}`).id = `upload-fill-${job_id}`;
-      pollUploadProgress(job_id, () => refreshFileList(albumId, fileListEl));
+      document.getElementById(`upload-dismiss-${rowId}`).id = `upload-dismiss-${job_id}`;
+      pollUploadProgress(job_id, onSettled);
     })
     .catch((e) => {
       const statusEl = document.getElementById(`upload-status-${rowId}`);
       if (statusEl) { statusEl.textContent = e.message; statusEl.classList.add('error'); }
+      showUploadDismissBtn(rowId);
+      if (onSettled) onSettled();
     });
 }
 
-function wireDropzone(dropzoneEl, browseBtnEl, fileInputEl, onFiles) {
-  dropzoneEl.addEventListener('dragover', (e) => { e.preventDefault(); dropzoneEl.classList.add('dragover'); });
-  dropzoneEl.addEventListener('dragleave', () => dropzoneEl.classList.remove('dragover'));
-  dropzoneEl.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropzoneEl.classList.remove('dragover');
-    onFiles(e.dataTransfer.files);
-  });
-  browseBtnEl.addEventListener('click', () => fileInputEl.click());
-  fileInputEl.addEventListener('change', () => onFiles(fileInputEl.files));
+const LARGE_BATCH_FILE_COUNT = 10;
+const LARGE_BATCH_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+
+// Files are staged in fixed-size batches rather than fired all at once:
+// batch N+1 doesn't start until every file in batch N has settled, so at
+// most UPLOAD_BATCH_SIZE files ever sit as temp copies on the server's disk
+// at the same time -- this is what actually caps the temp-disk spike risk
+// (the backend's upload semaphore only throttles concurrent Telegram
+// sends, not how many files get accepted/buffered up front). It also gives
+// very large uploads a natural "Batch X of Y" checkpoint to show progress
+// against, rather than one flat, meaningless "N/4000" counter.
+const UPLOAD_BATCH_SIZE = 25;
+const LARGE_UPLOAD_BATCH_THRESHOLD = 300;
+
+// Entry point for every upload trigger (dropzones, grid drag-drop, native
+// file pickers) -- warns before a large batch, pre-checks disk space, then
+// hands off to the batched queue.
+// Estimates peak temp-disk usage as one batch's worth (since batches are
+// processed one at a time -- see UPLOAD_BATCH_SIZE) and warns if free space
+// is tight. Returns true to proceed (space is fine, or the user chose to
+// continue anyway), false to abort.
+async function checkDiskSpaceOrConfirm(files) {
+  const batchBytes = files
+    .slice(0, UPLOAD_BATCH_SIZE)
+    .reduce((sum, f) => sum + f.size, 0);
+  let freeBytes;
+  try {
+    freeBytes = await window.pywebview.api.get_free_disk_space_bytes();
+  } catch (e) {
+    return true; // can't check -- don't block the upload over it
+  }
+  const neededBytes = batchBytes * 2; // safety margin
+  if (freeBytes >= neededBytes) return true;
+  return confirm(
+    `Low disk space: only ${formatBytes(freeBytes)} free, and this batch may need up to `
+    + `${formatBytes(batchBytes)} temporarily. Continue anyway?`,
+  );
 }
 
-function initStorageView() {
-  const dropzone = document.getElementById('dropzone-storage');
-  const browseBtn = document.getElementById('btn-browse-storage');
-  const fileInput = document.getElementById('file-input-storage');
-  const uploads = document.getElementById('uploads-storage');
-  const fileList = document.getElementById('file-list-storage');
+async function queueBatchUpload(fileListOrArray, albumId, uploadsContainerEl, onEachDone) {
+  const files = Array.from(fileListOrArray);
+  if (!files.length) return;
 
-  wireDropzone(dropzone, browseBtn, fileInput, (files) => {
-    Array.from(files).forEach((f) => handleUpload(f, null, uploads, fileList));
+  const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+  if (files.length > LARGE_BATCH_FILE_COUNT || totalBytes > LARGE_BATCH_BYTES) {
+    let message = `Upload ${files.length} files (${formatBytes(totalBytes)})? Large batches are queued a `
+      + `couple at a time to avoid Telegram rate limits, so this may take a while.`;
+    if (files.length > LARGE_UPLOAD_BATCH_THRESHOLD) {
+      const batchCount = Math.ceil(files.length / UPLOAD_BATCH_SIZE);
+      message += ` This will run as ${batchCount} batches of up to ${UPLOAD_BATCH_SIZE} files each.`;
+    }
+    if (!confirm(message)) return;
+
+    if (!(await checkDiskSpaceOrConfirm(files))) return;
+  }
+
+  // Awaited (not fire-and-forget): callers that need to know when the
+  // whole batch has genuinely finished -- e.g. before resetting a file
+  // input's value, see album-gallery.js -- rely on this promise not
+  // resolving early. WebKit has a long-documented bug where clearing a
+  // file input's .value can invalidate the data of File objects obtained
+  // from it that haven't been read yet, even ones already referenced
+  // elsewhere in JS; for a 750-file batch spread over many sequential
+  // server-side batches, resetting the input seconds after selection
+  // (instead of after the whole thing finishes) meant nearly every file's
+  // data was gone by the time its turn came up, surfacing as the backend
+  // reporting the "file" field as missing on almost every upload.
+  await runUploadQueue(files, albumId, uploadsContainerEl, onEachDone);
+}
+
+// Pause only stops the *next* batch from starting -- the batch already in
+// flight (up to UPLOAD_BATCH_SIZE files) keeps going, since aborting
+// in-flight network requests cleanly is a lot messier than just not
+// starting new ones. That means Pause takes effect within a batch or two,
+// not instantly.
+function waitWhilePaused(pauseState) {
+  return new Promise((resolve) => {
+    (function check() {
+      if (!pauseState.paused) { resolve(); return; }
+      setTimeout(check, 300);
+    })();
   });
-  refreshFileList(null, fileList);
+}
+
+async function runUploadQueue(files, albumId, uploadsContainerEl, onEachDone) {
+  const total = files.length;
+  const batchCount = Math.ceil(total / UPLOAD_BATCH_SIZE);
+  const showBatches = total > LARGE_UPLOAD_BATCH_THRESHOLD;
+  let settled = 0;
+  const pauseState = { paused: false };
+
+  let summaryEl = null;
+  let summaryTextEl = null;
+  let pauseBtnEl = null;
+  if (total > 1) {
+    const summaryId = `upload-batch-summary-${Date.now()}`;
+    uploadsContainerEl.insertAdjacentHTML('afterbegin', `
+      <div class="upload-batch-summary" id="${summaryId}">
+        <span class="upload-batch-summary-text"></span>
+        <button class="btn btn-secondary upload-pause-btn">Pause</button>
+      </div>`);
+    summaryEl = document.getElementById(summaryId);
+    summaryTextEl = summaryEl.querySelector('.upload-batch-summary-text');
+    pauseBtnEl = summaryEl.querySelector('.upload-pause-btn');
+    pauseBtnEl.addEventListener('click', () => {
+      pauseState.paused = !pauseState.paused;
+      pauseBtnEl.textContent = pauseState.paused ? 'Resume' : 'Pause';
+      updateSummary(0);
+    });
+  }
+
+  function updateSummary(batchIndex) {
+    if (!summaryTextEl) return;
+    if (settled >= total) {
+      summaryTextEl.textContent = `Uploaded ${total}/${total}`;
+      if (pauseBtnEl) pauseBtnEl.classList.add('hidden');
+      return;
+    }
+    const pausedNote = pauseState.paused ? ' (paused — finishing current batch)' : '';
+    summaryTextEl.textContent = (showBatches
+      ? `Batch ${batchIndex + 1} of ${batchCount} — ${settled}/${total} uploaded…`
+      : `Uploaded ${settled}/${total}…`) + pausedNote;
+  }
+
+  for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+    await waitWhilePaused(pauseState);
+    const batchFiles = files.slice(batchIndex * UPLOAD_BATCH_SIZE, (batchIndex + 1) * UPLOAD_BATCH_SIZE);
+    await Promise.all(batchFiles.map((file) => new Promise((resolve) => {
+      handleUpload(file, albumId, uploadsContainerEl, () => {
+        settled++;
+        updateSummary(batchIndex);
+        onEachDone();
+        resolve();
+      });
+    })));
+  }
+
+  if (summaryEl) setTimeout(() => summaryEl.remove(), 4000);
+}
+
+// Some drag sources (notably Photos.app, and some other "promise drag"
+// providers) don't hand WKWebView real file bytes -- the browser gets a
+// placeholder File with no content, which then fails multipart upload with
+// a confusing "field required" error from the backend. Filtering these out
+// up front turns that into a clear, actionable message instead. Plain
+// Finder drags, and the native file picker (used by the "+"/"choose
+// files" buttons), aren't affected by this -- only OS-level drag payloads.
+function filterValidDroppedFiles(fileList) {
+  const files = Array.from(fileList);
+  const valid = files.filter((f) => f && f.size > 0);
+  const skipped = files.length - valid.length;
+  // Always report skipped files, not just when the whole drop was invalid --
+  // in a large batch a handful of unreadable files used to vanish with no
+  // trace, leaving the total silently short with no way to tell what
+  // happened to them.
+  if (skipped > 0 && valid.length === 0) {
+    alert("Couldn't read the dropped file(s) — this can happen when dragging directly from Photos.app. Try dragging from Finder instead, or use the picker button.");
+  } else if (skipped > 0) {
+    const names = files.filter((f) => !(f && f.size > 0)).map((f) => f.name).slice(0, 10).join('\n');
+    const more = skipped > 10 ? `\n…and ${skipped - 10} more` : '';
+    alert(
+      `${skipped} of ${files.length} file(s) couldn't be read and ${skipped === 1 ? 'was' : 'were'} skipped `
+      + `(this can happen when dragging directly from Photos.app, or a file that's mid-sync/mid-download):\n\n${names}${more}\n\n`
+      + `Everything else was queued normally.`
+    );
+  }
+  return valid;
+}
+
+// Copies text to the clipboard and briefly flashes the triggering button's
+// label to confirm it happened, since there's no other feedback for a
+// clipboard write.
+async function copyToClipboard(text, btnEl) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    alert("Couldn't copy to clipboard.");
+    return;
+  }
+  if (!btnEl) return;
+  const original = btnEl.textContent;
+  btnEl.textContent = 'Copied!';
+  setTimeout(() => { btnEl.textContent = original; }, 1500);
 }
 
 function initSettingsView() {
@@ -160,12 +485,55 @@ function initSettingsView() {
   const tsToggle = document.getElementById('toggle-tailscale');
   const tokenBox = document.getElementById('pairing-token-box');
   const revealBtn = document.getElementById('btn-reveal-token');
+  const copyTokenBtn = document.getElementById('btn-copy-token');
   const rotateBtn = document.getElementById('btn-rotate-token');
+  const albumIdBox = document.getElementById('iphone-album-id-box');
+  const copyAlbumIdBtn = document.getElementById('btn-copy-album-id');
+  const tsUrlBox = document.getElementById('tailscale-url-box');
+  const copyUrlBtn = document.getElementById('btn-copy-tailscale-url');
+  const refreshUrlBtn = document.getElementById('btn-refresh-tailscale-url');
+
+  let currentAlbumId = null;
+  let currentUploadUrl = null;
 
   API.request('/api/settings').then((settings) => {
     watchFolderLabel.textContent = settings.watch_folder || 'Not set';
     watchFolderInput.value = settings.watch_folder || '';
     tsToggle.classList.toggle('on', !!settings.tailscale_access_enabled);
+    currentAlbumId = settings.iphone_backup_album_id;
+    albumIdBox.textContent = currentAlbumId != null ? String(currentAlbumId) : 'Not created yet';
+  });
+
+  async function refreshTailscaleUrl() {
+    tsUrlBox.textContent = 'Checking…';
+    try {
+      const result = await API.request('/api/settings/tailscale_url');
+      if (result.available) {
+        currentUploadUrl = result.upload_url;
+        tsUrlBox.textContent = result.upload_url;
+      } else {
+        currentUploadUrl = null;
+        tsUrlBox.textContent = "Tailscale not detected — install/run Tailscale, then Refresh.";
+      }
+    } catch (e) {
+      currentUploadUrl = null;
+      tsUrlBox.textContent = e.message;
+    }
+  }
+  refreshTailscaleUrl();
+  refreshUrlBtn.addEventListener('click', refreshTailscaleUrl);
+  copyUrlBtn.addEventListener('click', () => {
+    if (currentUploadUrl) copyToClipboard(currentUploadUrl, copyUrlBtn);
+  });
+
+  copyAlbumIdBtn.addEventListener('click', () => {
+    if (currentAlbumId != null) copyToClipboard(String(currentAlbumId), copyAlbumIdBtn);
+  });
+
+  copyTokenBtn.addEventListener('click', async () => {
+    const token = await window.pywebview.api.get_pairing_token();
+    tokenBox.textContent = token;
+    copyToClipboard(token, copyTokenBtn);
   });
 
   saveBtn.addEventListener('click', async () => {
@@ -193,6 +561,71 @@ function initSettingsView() {
     if (!confirm('Rotate the pairing token? Any device using the old token (e.g. your iOS Shortcut) will need to be updated.')) return;
     tokenBox.textContent = await window.pywebview.api.rotate_pairing_token();
   });
+
+  const syncBtn = document.getElementById('btn-sync');
+  syncBtn.addEventListener('click', async () => {
+    syncBtn.disabled = true;
+    await runSync({});
+    syncBtn.disabled = false;
+  });
+
+  document.getElementById('btn-help-open-telegram-api').addEventListener('click', () => {
+    window.pywebview.api.open_telegram_api_page();
+  });
+
+  const logoutBtn = document.getElementById('btn-logout');
+  logoutBtn.addEventListener('click', async () => {
+    if (!confirm(
+      'Log out of Telegram? This clears the local index on this Mac (nothing in Telegram itself '
+      + 'is touched) and signs you out -- you\'ll need to sign back in.'
+    )) return;
+    logoutBtn.disabled = true;
+    try {
+      await API.request('/api/setup/logout', { method: 'POST' });
+      // Full reload rather than re-running checkSetupStatus() in place --
+      // every init*View() function attaches its own event listeners, and
+      // calling them a second time in the same page would double them up.
+      window.location.reload();
+    } catch (e) {
+      alert(e.message);
+      logoutBtn.disabled = false;
+    }
+  });
+}
+
+// --- Shared lightbox chrome (one overlay in the DOM, used by every gallery
+// module) -- wired once via initLightboxChrome(), called from boot() below.
+
+function closeLightbox() {
+  document.getElementById('lightbox-overlay').classList.add('hidden');
+  document.getElementById('lightbox-media').innerHTML = '';
+  LIGHTBOX_OWNER = null;
+}
+
+// Canonical shared entry points -- dispatch to whichever module currently
+// owns the open lightbox. These are the only lightbox-nav names any other
+// script should reference by name.
+function lightboxPrev() {
+  if (LIGHTBOX_OWNER) LIGHTBOX_OWNER.lightboxPrev();
+}
+
+function lightboxNext() {
+  if (LIGHTBOX_OWNER) LIGHTBOX_OWNER.lightboxNext();
+}
+
+function initLightboxChrome() {
+  document.getElementById('btn-lightbox-close').addEventListener('click', closeLightbox);
+  document.getElementById('btn-lightbox-prev').addEventListener('click', lightboxPrev);
+  document.getElementById('btn-lightbox-next').addEventListener('click', lightboxNext);
+  document.getElementById('lightbox-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'lightbox-overlay') closeLightbox();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (document.getElementById('lightbox-overlay').classList.contains('hidden')) return;
+    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowLeft') lightboxPrev();
+    if (e.key === 'ArrowRight') lightboxNext();
+  });
 }
 
 function initNav() {
@@ -212,9 +645,14 @@ async function checkSetupStatus() {
     document.getElementById('setup-overlay').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     initNav();
-    initStorageView();
+    initLightboxChrome();
     initAlbumsView();
     initSettingsView();
+    initTour();
+    runSync({ toast: true }); // not awaited -- non-blocking, per the request
+    API.request('/api/settings').then((settings) => {
+      if (!settings.onboarding_completed) openTour();
+    });
   } else {
     document.getElementById('setup-overlay').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
@@ -234,3 +672,13 @@ if (window.pywebview) {
 } else {
   window.addEventListener('pywebviewready', boot);
 }
+
+// Safety net: WKWebView's default action for a drop it doesn't otherwise
+// handle is to navigate the whole window to the dropped file, replacing
+// the app with a raw native image/file preview that has no way back (no
+// close button, since it's not our UI). Every real drop target calls
+// preventDefault() itself (album-gallery.js's grid), but this catches
+// anything that misses -- a drop landing just outside a
+// target, or racing with its handler.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
