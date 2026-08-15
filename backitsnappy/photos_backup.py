@@ -1,19 +1,28 @@
-"""Orchestrates the Automatic Photos Backup feature: poll Photos.app for
-new items, export -> upload -> (only after a confirmed Telegram response)
-delete via Photos' own `delete` command, log it.
+"""Orchestrates the Automatic Photos Backup feature: poll the Photos
+library for new items, export -> upload -> log, then delete everything
+that uploaded successfully in one batch at the end of the cycle.
 
-Pure asyncio, no threads -- unlike the folder watchers this replaced,
-there's no filesystem to watch; it's just periodic subprocess calls
-(photos_automation.py) plus the existing upload pipeline.
+Deleting is batched, and separated from the per-item work, for a reason
+that isn't obvious: it goes through PhotoKit (see
+photos_automation.delete_items), and macOS shows the user one confirmation
+prompt per change request. Batching a cycle's worth of items into a single
+request means one prompt instead of one per photo.
+
+Ordering matters as much as batching. An item is logged to
+photos_backup_log the moment its upload is confirmed, *before* any delete
+is attempted -- so "backed up so far" counts what's genuinely safe in
+Telegram, and a delete that fails (or that the user declines at the
+prompt) leaves the item in the library rather than un-counting a real
+backup.
 
 Upload completion is observed by polling the same job dict the frontend's
 own progress bar polls (manager.jobs[job_id], see api/routes_upload.py) --
 deliberately not client_manager's on_confirmed callback mechanism, since
-that would need a sync-callback-schedules-async-task bridge (delete_item is
-a subprocess call) for no real benefit: this module already needs job["status"]
-and job["file_id"], both already used elsewhere for exactly this. A file is
-only ever considered "safely backed up" once job["status"] == "done" and a
-real files.id row is confirmed present.
+that would need a sync-callback-schedules-async-task bridge for no real
+benefit: this module already needs job["status"] and job["file_id"], both
+already used elsewhere for exactly this. A file is only ever considered
+"safely backed up" once job["status"] == "done" and a real files.id row is
+confirmed present.
 """
 import asyncio
 import logging
@@ -34,9 +43,9 @@ logger = logging.getLogger(__name__)
 POLL_TICK_SECONDS = 30
 UPLOAD_POLL_INTERVAL_SECONDS = 0.5
 
-# Items currently mid-export/upload/delete -- guards against a poll cycle
-# re-discovering an item as "new" while it's still in flight (it isn't in
-# photos_backup_log yet, since that only gets written once fully done).
+# Items currently mid-export/upload -- guards against a poll cycle
+# re-discovering an item as "new" while it's still in flight, before its
+# photos_backup_log row exists.
 _in_flight: set[str] = set()
 
 # Live progress for the Settings UI -- "is a poll cycle actively running
@@ -50,7 +59,12 @@ def get_status() -> dict:
     return dict(_status)
 
 
-async def _process_item(manager: TelegramManager, album_id: int, item_id: str, filename: str) -> None:
+async def _process_item(manager: TelegramManager, album_id: int, item_id: str, filename: str) -> str | None:
+    """Exports and uploads one item, logging it as backed up once the
+    upload is confirmed. Returns the item id if it is now safe to delete
+    from Photos, or None if anything went wrong (in which case the item
+    stays in the library). Deleting is deliberately *not* done here -- see
+    poll_cycle, which batches it."""
     _in_flight.add(item_id)
     temp_dir = Path(tempfile.mkdtemp(prefix="backitsnappy-photos-"))
     try:
@@ -72,7 +86,7 @@ async def _process_item(manager: TelegramManager, album_id: int, item_id: str, f
                     "Photos backup upload failed for %s (%s), leaving it in Photos: %s",
                     filename, path.name, job.get("error"),
                 )
-                return
+                return None
 
             file_row = db.get_file(job["file_id"])
             if file_row is None:
@@ -80,14 +94,16 @@ async def _process_item(manager: TelegramManager, album_id: int, item_id: str, f
                     "Photos backup: uploaded file row vanished for %s (%s) before delete",
                     filename, path.name,
                 )
-                return
+                return None
             file_rows.append(file_row)
 
-        # Only reachable once every exported component has a real files.id
-        # row -- each only ever gets inserted after Telegram actually
-        # returned a message id (fresh, forwarded, or deduped-existing; see
-        # client_manager._do_upload). Deleting from Photos here is safe.
-        await photos_automation.delete_item(item_id)
+        # Log every component as backed up the moment its upload is
+        # confirmed -- deliberately *before* attempting the delete below,
+        # not after. "Backed up so far" in Settings counts these rows, and
+        # the delete step is a separate, currently-flaky operation (see
+        # the -10000 AppleEvent issue): a file that's safely in Telegram
+        # should count as backed up regardless of whether Photos.app lets
+        # it be removed from the library yet.
         now = time.time()
         for file_row in file_rows:
             db.insert_photos_backup_log(
@@ -97,14 +113,20 @@ async def _process_item(manager: TelegramManager, album_id: int, item_id: str, f
                 telegram_message_id=file_row["telegram_message_id"],
                 channel_id=file_row["channel_id"],
                 uploaded_at=now,
-                deleted_at=now,
             )
         logger.info(
-            "Photos backup: backed up (%d file(s)) and deleted %s (item %s)",
+            "Photos backup: uploaded %d file(s) for %s (item %s)",
             len(file_rows), filename, item_id,
         )
+        # Every exported component now has a real files.id row -- each only
+        # ever inserted after Telegram actually returned a message id
+        # (fresh, forwarded, or deduped-existing; see
+        # client_manager._do_upload). Safe to delete, so hand the id back
+        # for poll_cycle's batched delete.
+        return item_id
     except Exception:
         logger.exception("Photos backup failed for item %s (%s)", item_id, filename)
+        return None
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
         _in_flight.discard(item_id)
@@ -134,11 +156,35 @@ async def poll_cycle(manager: TelegramManager) -> None:
     album_id = await manager.ensure_photos_backup_album()
     _status.update(active=True, total=len(new_items), done=0)
     try:
-        await asyncio.gather(
+        results = await asyncio.gather(
             *(_process_item(manager, album_id, item_id, filename) for item_id, filename in new_items)
         )
     finally:
         _status["active"] = False
+
+    # One batched delete for everything that uploaded successfully, rather
+    # than one call per item: macOS shows a confirmation prompt per PhotoKit
+    # change request, so batching turns N prompts into one (see
+    # photos_automation.delete_items). Items whose upload failed are simply
+    # absent from this list and stay in the library.
+    deletable = [item_id for item_id in results if item_id]
+    if not deletable:
+        return
+    try:
+        deleted_count = await photos_automation.delete_items(deletable)
+    except photos_automation.PhotosAutomationError:
+        logger.exception(
+            "Photos backup: %d item(s) are uploaded but couldn't be deleted from Photos",
+            len(deletable),
+        )
+        return
+    now = time.time()
+    for item_id in deletable:
+        db.mark_photos_backup_deleted(item_id, now)
+    logger.info(
+        "Photos backup: deleted %d of %d backed-up item(s) from Photos",
+        deleted_count, len(deletable),
+    )
 
 
 async def poll_loop(manager: TelegramManager, stop_event: asyncio.Event) -> None:

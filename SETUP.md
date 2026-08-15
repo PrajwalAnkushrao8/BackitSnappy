@@ -148,10 +148,12 @@ once that window passes, or right away if you empty Recently Deleted yourself.
 The upload is always confirmed *before* the delete — an item is never removed
 from Photos unless it's verifiably in Telegram first.
 
-> **Known limitation in v0.2.0:** on some libraries the delete step fails with
-> an AppleEvent error (`-10000`). The upload half works correctly, so nothing
-> is lost — affected items are backed up but remain in your Photos library.
-> This is under investigation; see [USAGE.md](USAGE.md#troubleshooting).
+> **You'll be asked to confirm each batch.** Deletion goes through PhotoKit,
+> which always shows a macOS confirmation dialog — there's no way for an app to
+> suppress it. BackitSnappy deletes a whole cycle's worth of items in one
+> request, so you get **one dialog per cycle** rather than one per photo. If
+> you're away from the machine, the cycle simply waits; declining leaves
+> everything in your library, already safely backed up.
 
 Turning the toggle off stops the whole loop immediately. It's off by default,
 and it's the only feature in the app that deletes anything from Photos.

@@ -136,9 +136,9 @@ your iCloud storage frees up without anything being destroyed outright.
 - **Recent Photos Backups** below lists what's been backed up so far.
 
 The upload is confirmed before anything is deleted — an item never leaves your
-library unless it's verifiably in Telegram first. See
-[SETUP.md §7](SETUP.md#7-turn-on-automatic-photos-backup-optional), and the
-known `-10000` delete limitation in [Troubleshooting](#troubleshooting).
+library unless it's verifiably in Telegram first. macOS shows one confirmation
+dialog per cycle before deleting (see
+[SETUP.md §7](SETUP.md#7-turn-on-automatic-photos-backup-optional)).
 
 ### Storage used on this Mac
 
@@ -200,13 +200,17 @@ silently carry over to someone else's account.
 
 ## Troubleshooting
 
-**Automatic Photos Backup uploads but doesn't delete (`-10000`)** — a known
-limitation in v0.2.0. The upload half completes correctly, so nothing is at
-risk; affected items stay in your Photos library instead of moving to Recently
-Deleted. The failure is an AppleEvent error from Photos.app's own scripting
-interface and is under investigation. If you want the space back meanwhile,
-delete the backed-up items in Photos manually — the **Recent Photos Backups**
-list in Settings shows exactly what made it to Telegram.
+**Automatic Photos Backup uploads but never deletes** — most likely nobody
+answered the confirmation dialog. macOS requires one for every PhotoKit
+deletion and it can't be suppressed, so a cycle that runs while you're away
+uploads everything and then waits. Nothing is at risk: the uploads are already
+logged and counted, and the items stay in your library until a later cycle's
+dialog is approved.
+
+If you're on a build older than v0.2.1, this instead showed up as an AppleEvent
+`-10000` error. That was a real bug — Photos.app's scripting interface only
+supports deleting *albums and folders*, never individual media items, so the
+delete could never have worked. It now goes through PhotoKit instead.
 
 **Automatic Photos Backup does nothing at all** — check **Automation
 permission** in Settings. If it says denied or unchecked, macOS never granted

@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.2.1
+
+Fixes the two Automatic Photos Backup problems v0.2.0 shipped with: photos
+were never actually removed from the library, and the "backed up so far"
+counter sat at zero even while uploads were succeeding.
+
+### Fixed
+
+- **Deleting from Photos now works.** v0.2.0 failed on every item with an
+  AppleEvent `-10000` error, which was documented as a known issue. The cause
+  turned out to be structural rather than a bug in the script: Photos.app's
+  scripting dictionary defines `delete` as *"Only albums and folders can be
+  deleted,"* with a direct parameter accepting exactly the types `album` and
+  `folder`. A media item is not an accepted type, so the handler rejected it —
+  no amount of rewriting that AppleScript could ever have worked.
+
+  Deletion now goes through PhotoKit (`PHAssetChangeRequest.deleteAssets:`)
+  instead. Export and listing stay on AppleScript, since that's what exposes
+  `export ... usingOriginals` for forcing an iCloud original to download. The
+  two interfaces identify items with the same string — a Photos scripting `id`
+  and a PhotoKit `localIdentifier` are identical — so nothing already stored
+  needed migrating.
+
+- **"Backed up so far" counts real uploads again.** The audit-log row was only
+  written *after* a successful delete, so the broken delete step above kept the
+  counter pinned at zero and, worse, kept every already-uploaded item looking
+  "new" to the next poll cycle. Rows are now written the moment an upload is
+  confirmed, with the deletion timestamp filled in separately afterward.
+
+### Changed
+
+- **Deletion is batched per poll cycle, and macOS will ask you to confirm.**
+  PhotoKit shows a confirmation dialog for every change request and an
+  unbundled app cannot suppress it, so a cycle's items are deleted in a single
+  request — one dialog per cycle instead of one per photo. Declining it leaves
+  everything in the library, still backed up and still counted.
+
+### Added
+
+- `pyobjc-framework-Photos` dependency, required for the PhotoKit deletion path.
+
 ## v0.2.0
 
 The release where BackitSnappy becomes a place you actually browse your
@@ -104,7 +145,7 @@ secrets in logs, and all dependencies past their known-CVE versions.
 
 - Automatic Photos Backup can fail to delete from Photos on some libraries with
   an AppleEvent `-10000` error. Uploads are unaffected — items are backed up
-  but stay in the library. Under investigation.
+  but stay in the library. Under investigation. *(Fixed in v0.2.1.)*
 
 ## v0.1.0
 

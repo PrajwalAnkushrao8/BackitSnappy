@@ -76,6 +76,13 @@ CREATE TABLE IF NOT EXISTS upload_queue (
 -- photos_backup._process_item). photos_item_id is intentionally not
 -- unique; db.get_processed_photos_item_ids() just needs *a* row to exist
 -- for an item to treat it as already handled.
+--
+-- deleted_at is nullable: a row is written as soon as the upload is
+-- confirmed, independent of whether the subsequent Photos delete
+-- succeeds -- so "backed up so far" reflects what's actually safe in
+-- Telegram, not a count that stays frozen at zero whenever the delete
+-- step fails (see _migrate_photos_backup_log_deleted_at_nullable for existing
+-- installs, which created this column NOT NULL before that changed).
 CREATE TABLE IF NOT EXISTS photos_backup_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     photos_item_id TEXT NOT NULL,
@@ -84,7 +91,7 @@ CREATE TABLE IF NOT EXISTS photos_backup_log (
     telegram_message_id INTEGER NOT NULL,
     channel_id INTEGER NOT NULL,
     uploaded_at REAL NOT NULL,
-    deleted_at REAL NOT NULL
+    deleted_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_photos_backup_log_item_id ON photos_backup_log(photos_item_id);
 
@@ -152,6 +159,39 @@ def _migrate_api_hash_to_keychain(conn: sqlite3.Connection) -> None:
     logger.info("Migrated %d api_hash value(s) out of the database into the Keychain", len(rows))
 
 
+def _migrate_photos_backup_log_deleted_at_nullable(conn: sqlite3.Connection) -> None:
+    """One-time relax of photos_backup_log.deleted_at from NOT NULL to
+    nullable, for databases created before that changed.
+
+    SQLite has no ALTER TABLE for dropping a NOT NULL constraint, so this
+    rebuilds the table: existing rows (all of which have a real
+    deleted_at, since they could only have been inserted after a
+    successful delete under the old code) come across unchanged."""
+    row = conn.execute(
+        "SELECT \"notnull\" FROM pragma_table_info('photos_backup_log') WHERE name = 'deleted_at'"
+    ).fetchone()
+    if row is None or row["notnull"] == 0:
+        return
+    conn.executescript("""
+        CREATE TABLE photos_backup_log_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            photos_item_id TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            telegram_message_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            uploaded_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        INSERT INTO photos_backup_log_new SELECT * FROM photos_backup_log;
+        DROP TABLE photos_backup_log;
+        ALTER TABLE photos_backup_log_new RENAME TO photos_backup_log;
+        CREATE INDEX IF NOT EXISTS idx_photos_backup_log_item_id ON photos_backup_log(photos_item_id);
+    """)
+    conn.commit()
+    logger.info("Relaxed photos_backup_log.deleted_at to nullable")
+
+
 def _restrict_db_permissions() -> None:
     """0600, not the default 0644 -- this file holds the full index of what
     the user has stored, plus their phone number. No other account on the
@@ -173,6 +213,7 @@ def get_connection() -> sqlite3.Connection:
             _conn.executescript(SCHEMA)
             _conn.commit()
             _migrate_api_hash_to_keychain(_conn)
+            _migrate_photos_backup_log_deleted_at_nullable(_conn)
         _restrict_db_permissions()
     return _conn
 
@@ -409,8 +450,13 @@ def insert_photos_backup_log(
     telegram_message_id: int,
     channel_id: int,
     uploaded_at: float,
-    deleted_at: float,
+    deleted_at: float | None = None,
 ) -> int:
+    """deleted_at defaults to None: the row is written as soon as the
+    upload is confirmed (see photos_backup._process_item), before the
+    Photos delete is even attempted -- mark_photos_backup_deleted fills it
+    in afterward if that succeeds. This is what lets "backed up so far"
+    count real, confirmed uploads even while the delete step is failing."""
     conn = get_connection()
     with _write_lock:
         cur = conn.execute(
@@ -421,6 +467,21 @@ def insert_photos_backup_log(
         )
         conn.commit()
         return cur.lastrowid
+
+
+def mark_photos_backup_deleted(photos_item_id: str, deleted_at: float) -> None:
+    """Fills in deleted_at for every not-yet-deleted log row belonging to
+    one Photos item -- called once photos_automation.delete_items actually
+    succeeds. A no-op if the delete step keeps failing (see the -10000
+    issue), which is exactly the point: the upload stays logged and
+    counted either way."""
+    conn = get_connection()
+    with _write_lock:
+        conn.execute(
+            "UPDATE photos_backup_log SET deleted_at = ? WHERE photos_item_id = ? AND deleted_at IS NULL",
+            (deleted_at, photos_item_id),
+        )
+        conn.commit()
 
 
 def get_processed_photos_item_ids() -> set[str]:

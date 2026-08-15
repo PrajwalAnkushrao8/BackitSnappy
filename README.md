@@ -104,10 +104,12 @@ that window, or right away if you empty Recently Deleted yourself.
 This is **off by default** and requires macOS Automation permission for
 Photos.app, which the system will prompt for the first time it runs.
 
-> **Known limitation:** deleting from Photos currently fails on some libraries
-> with an AppleEvent error (`-10000`) and is under investigation. Uploads work
-> correctly; if you hit this, items are backed up but stay in your Photos
-> library. See [USAGE.md](USAGE.md#troubleshooting).
+> **macOS will ask you to confirm.** Deleting goes through PhotoKit, and macOS
+> shows a confirmation dialog for it that can't be suppressed. BackitSnappy
+> batches a whole cycle into a single request, so it's **one dialog per cycle**,
+> not one per photo — but it does mean the feature needs you at the machine to
+> approve. Decline it and everything simply stays in your library, still backed
+> up.
 
 ## Auto-backup from a folder
 

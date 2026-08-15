@@ -1,16 +1,34 @@
-"""Low-level bridge to macOS Photos.app via JXA (JavaScript for Automation),
-run through `osascript`. This module is scripting-only -- no business logic,
-no Telegram, no database. It never touches anything under a .photoslibrary
-package directly; every interaction goes through Photos' own scripting
-interface (`export`, `delete`), the same guarantee Apple's own Shortcuts
-integration relies on.
+"""Low-level bridge to the macOS photo library. No business logic, no
+Telegram, no database. Nothing under a .photoslibrary package is ever
+touched directly -- every interaction goes through Apple's own supported
+interfaces.
 
-Every call has a bounded timeout: the very first Apple Event this process
-ever sends to Photos.app triggers a one-time macOS Automation permission
-dialog that blocks until a human answers it (confirmed live against this
-app's actual Photos.app -- see the plan). A background poll loop must never
-be allowed to hang on that, so a timeout here is read as "still waiting on
-the user," not treated as a hard failure.
+Two of those, deliberately, because neither covers the whole job:
+
+- **Reading and exporting** go through Photos.app's scripting interface
+  (JXA via `osascript`), which is what exposes `export ... usingOriginals`
+  -- the thing that forces an iCloud original to be downloaded rather than
+  handing back a placeholder.
+- **Deleting** goes through PhotoKit (`PHAssetChangeRequest.deleteAssets:`)
+  because Photos' scripting interface simply cannot do it. Its own
+  dictionary says so outright: the `delete` command is documented as
+  "Only albums and folders can be deleted," and its direct parameter
+  accepts exactly the types `album` and `folder`. Passing a media item is
+  a type the handler does not accept, which is what produced the
+  long-standing `-10000` ("AppleEvent handler failed") error -- not a
+  syntax problem, and not fixable by rewriting the script.
+
+The two identify items identically: a Photos scripting `id` and a PhotoKit
+`localIdentifier` are the same string (e.g.
+"D48F1980-...-7B9FDAD525F4/L0/001"), verified against this library, so ids
+captured from one side can be handed straight to the other.
+
+Every osascript call has a bounded timeout: the very first Apple Event this
+process ever sends to Photos.app triggers a one-time macOS Automation
+permission dialog that blocks until a human answers it (confirmed live
+against this app's actual Photos.app). A background poll loop must never be
+allowed to hang on that, so a timeout here is read as "still waiting on the
+user," not treated as a hard failure.
 """
 import asyncio
 import json
@@ -147,22 +165,56 @@ async def export_item(item_id: str, dest_dir: Path) -> list[Path]:
     return exported
 
 
-async def delete_item(item_id: str) -> None:
-    """Moves one item to Photos' own Recently Deleted -- never a raw file
-    delete. Only ever called after a confirmed Telegram upload.
+def photokit_authorization_status() -> str:
+    """Read-write PhotoKit authorization, as a plain string. Distinct from
+    check_permission() above, which reports the *Automation* (Apple Events)
+    permission that export/list need -- deleting needs this one instead,
+    and macOS grants them separately."""
+    import Photos
 
-    Plain AppleScript rather than JXA here, unlike every other call in this
-    module: two different JXA argument shapes for delete() each failed
-    differently (a type-coercion error, then a generic internal handler
-    failure) even though export/list -- which touch the same mediaItems
-    collection -- work fine in JXA. That pattern points at JXA's bridge
-    translation for Photos' delete command specifically, not at argument
-    shape. AppleScript is what Photos' scripting dictionary was actually
-    authored against, so it sidesteps the bridge-translation question
-    entirely rather than trying a third JXA guess."""
-    script = f"""
-    tell application "Photos"
-        delete (media item id {_applescript_string(item_id)})
-    end tell
-    """
-    await _run_osascript(script, DELETE_TIMEOUT_SECONDS, language=None)
+    status = Photos.PHPhotoLibrary.authorizationStatusForAccessLevel_(Photos.PHAccessLevelReadWrite)
+    return {
+        0: "notDetermined", 1: "restricted", 2: "denied", 3: "authorized", 4: "limited",
+    }.get(status, f"unknown({status})")
+
+
+def _delete_assets_blocking(item_ids: list[str]) -> int:
+    """Synchronous PhotoKit deletion -- see delete_items for why this is
+    batched and what the caller must know about the confirmation prompt."""
+    import Photos
+
+    fetched = Photos.PHAsset.fetchAssetsWithLocalIdentifiers_options_(list(item_ids), None)
+    if fetched is None or fetched.count() == 0:
+        return 0
+    assets = [fetched.objectAtIndex_(i) for i in range(fetched.count())]
+
+    def changes() -> None:
+        Photos.PHAssetChangeRequest.deleteAssets_(assets)
+
+    library = Photos.PHPhotoLibrary.sharedPhotoLibrary()
+    ok, error = library.performChangesAndWait_error_(changes, None)
+    if not ok:
+        raise PhotosAutomationError(f"PhotoKit deletion failed: {error}")
+    return len(assets)
+
+
+async def delete_items(item_ids: list[str]) -> int:
+    """Moves items to Photos' own Recently Deleted (Apple's 30-day window)
+    -- never a raw file delete. Only ever called for items with a confirmed
+    Telegram upload behind them. Returns how many assets were actually
+    deleted, which can be fewer than requested if some ids no longer
+    resolve (already removed by hand, say).
+
+    Takes a *list*, and callers should pass the whole batch at once rather
+    than looping: macOS shows the user one confirmation prompt per change
+    request, so a batch of 139 is one prompt, while 139 single-item calls
+    would be 139 prompts. That prompt is enforced by the system for an
+    unbundled process like this one and cannot be suppressed -- it is the
+    reason this whole feature is inherently attended rather than silent.
+
+    Runs in a worker thread: performChangesAndWait_ blocks until the user
+    answers that prompt, which must not stall the event loop everything
+    else in the app shares."""
+    if not item_ids:
+        return 0
+    return await asyncio.to_thread(_delete_assets_blocking, item_ids)
