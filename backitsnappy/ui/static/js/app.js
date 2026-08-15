@@ -131,10 +131,22 @@ async function runSync({ toast = false } = {}) {
   }
 }
 
+// Escapes explicitly rather than round-tripping through textContent ->
+// innerHTML. That round-trip looks safe but uses the HTML spec's *text
+// node* serialization, which replaces only & < > and U+00A0 -- quotes
+// pass through untouched, since quote escaping only happens in attribute
+// serialization mode. Every caller here interpolates into an attribute
+// (alt=, title=), where a surviving " closes the attribute early and
+// everything after it parses as new attributes -- turning an
+// attacker-chosen Telegram filename into an onload= handler with access
+// to window.pywebview.api (and therefore the pairing token).
 function escapeHTML(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Right-click context menu. items: [{ label, action, destructive? }]
@@ -482,58 +494,182 @@ function initSettingsView() {
   const watchFolderLabel = document.getElementById('current-watch-folder');
   const watchFolderInput = document.getElementById('input-watch-folder');
   const saveBtn = document.getElementById('btn-save-watch-folder');
-  const tsToggle = document.getElementById('toggle-tailscale');
-  const tokenBox = document.getElementById('pairing-token-box');
-  const revealBtn = document.getElementById('btn-reveal-token');
-  const copyTokenBtn = document.getElementById('btn-copy-token');
-  const rotateBtn = document.getElementById('btn-rotate-token');
-  const albumIdBox = document.getElementById('iphone-album-id-box');
-  const copyAlbumIdBtn = document.getElementById('btn-copy-album-id');
-  const tsUrlBox = document.getElementById('tailscale-url-box');
-  const copyUrlBtn = document.getElementById('btn-copy-tailscale-url');
-  const refreshUrlBtn = document.getElementById('btn-refresh-tailscale-url');
-
-  let currentAlbumId = null;
-  let currentUploadUrl = null;
+  const photosBackupStatus = document.getElementById('photos-backup-status');
+  const photosPermissionStatus = document.getElementById('photos-permission-status');
+  const openAutomationSettingsBtn = document.getElementById('btn-open-automation-settings');
+  const pollIntervalInput = document.getElementById('input-poll-interval');
+  const savePollIntervalBtn = document.getElementById('btn-save-poll-interval');
+  const photosLastChecked = document.getElementById('photos-last-checked');
+  const photosBackedUpCount = document.getElementById('photos-backed-up-count');
+  const photosBackupToggle = document.getElementById('toggle-photos-backup');
+  const photosBackupLogList = document.getElementById('photos-backup-log-list');
+  const diskUsageTotal = document.getElementById('disk-usage-total');
+  const diskUsageBreakdown = document.getElementById('disk-usage-breakdown');
+  const refreshDiskUsageBtn = document.getElementById('btn-refresh-disk-usage');
+  const cacheMaxInput = document.getElementById('input-cache-max-gb');
+  const saveCacheMaxBtn = document.getElementById('btn-save-cache-max');
 
   API.request('/api/settings').then((settings) => {
     watchFolderLabel.textContent = settings.watch_folder || 'Not set';
     watchFolderInput.value = settings.watch_folder || '';
-    tsToggle.classList.toggle('on', !!settings.tailscale_access_enabled);
-    currentAlbumId = settings.iphone_backup_album_id;
-    albumIdBox.textContent = currentAlbumId != null ? String(currentAlbumId) : 'Not created yet';
   });
 
-  async function refreshTailscaleUrl() {
-    tsUrlBox.textContent = 'Checking…';
+  async function refreshDiskUsage() {
+    diskUsageTotal.textContent = 'Calculating…';
     try {
-      const result = await API.request('/api/settings/tailscale_url');
-      if (result.available) {
-        currentUploadUrl = result.upload_url;
-        tsUrlBox.textContent = result.upload_url;
-      } else {
-        currentUploadUrl = null;
-        tsUrlBox.textContent = "Tailscale not detected — install/run Tailscale, then Refresh.";
-      }
+      const usage = await API.request('/api/settings/disk_usage');
+      diskUsageTotal.textContent = `${formatBytes(usage.total_bytes)} of ${formatBytes(usage.max_bytes)} cache limit`;
+      diskUsageBreakdown.textContent =
+        `Cached originals: ${formatBytes(usage.media_cache_bytes)} · `
+        + `Thumbnails: ${formatBytes(usage.thumbnails_bytes)} · `
+        + `Index: ${formatBytes(usage.database_bytes)}`;
+      cacheMaxInput.value = (usage.max_bytes / 1024 ** 3).toFixed(1);
     } catch (e) {
-      currentUploadUrl = null;
-      tsUrlBox.textContent = e.message;
+      diskUsageTotal.textContent = e.message;
     }
   }
-  refreshTailscaleUrl();
-  refreshUrlBtn.addEventListener('click', refreshTailscaleUrl);
-  copyUrlBtn.addEventListener('click', () => {
-    if (currentUploadUrl) copyToClipboard(currentUploadUrl, copyUrlBtn);
+  refreshDiskUsage();
+  refreshDiskUsageBtn.addEventListener('click', refreshDiskUsage);
+
+  saveCacheMaxBtn.addEventListener('click', async () => {
+    const gigabytes = parseFloat(cacheMaxInput.value);
+    try {
+      await API.request('/api/settings/media_cache_max_bytes', { method: 'PUT', json: { gigabytes } });
+      await refreshDiskUsage();
+    } catch (e) {
+      alert(e.message);
+    }
   });
 
-  copyAlbumIdBtn.addEventListener('click', () => {
-    if (currentAlbumId != null) copyToClipboard(String(currentAlbumId), copyAlbumIdBtn);
+  function renderPhotosBackupLog(rows) {
+    if (!rows.length) {
+      photosBackupLogList.innerHTML = 'No photos backed up yet.';
+      return;
+    }
+    photosBackupLogList.innerHTML = rows.map((row) => {
+      const when = new Date(row.uploaded_at * 1000).toLocaleString();
+      return `
+        <div class="list-row">
+          <div style="flex:1; min-width:0;">
+            <div class="list-row-title">${escapeHTML(row.filename)}</div>
+            <div class="list-row-subtitle">${when} &middot; Telegram message #${row.telegram_message_id}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  async function refreshPhotosBackupLog() {
+    const rows = await API.request('/api/photos_backup/log');
+    renderPhotosBackupLog(rows);
+  }
+
+  async function refreshPhotosBackupSettings() {
+    const settings = await API.request('/api/photos_backup/settings');
+    pollIntervalInput.value = settings.poll_interval_minutes;
+    photosLastChecked.textContent = settings.last_checked_at
+      ? new Date(settings.last_checked_at * 1000).toLocaleString() : 'never';
+    photosBackedUpCount.textContent = String(settings.backed_up_count);
+    photosBackupToggle.classList.toggle('on', !!settings.enabled);
+    return settings;
+  }
+
+  // Live "is a poll cycle actively running right now" indicator -- polled
+  // continuously (not just while Settings happens to be open) so the count
+  // and log refresh themselves the moment a cycle finishes, without the
+  // user needing to reload anything.
+  let wasBackingUp = false;
+  async function pollBackupStatus() {
+    try {
+      const status = await API.request('/api/photos_backup/status');
+      photosBackupStatus.textContent = status.active
+        ? `Backing up now… (${status.done} of ${status.total})`
+        : 'Idle';
+      if (wasBackingUp && !status.active) {
+        await Promise.all([refreshPhotosBackupSettings(), refreshPhotosBackupLog()]);
+      }
+      wasBackingUp = status.active;
+    } catch (e) {
+      // Non-fatal -- leave the last known status text showing.
+    }
+  }
+  pollBackupStatus();
+  setInterval(pollBackupStatus, 3000);
+
+  function updatePermissionStatusUI(status) {
+    const labels = {
+      granted: 'Granted',
+      denied: 'Not granted — previously denied',
+      undetermined: 'Waiting for you to approve the system permission prompt…',
+      error: 'Could not check permission status',
+    };
+    photosPermissionStatus.textContent = labels[status] || status;
+    openAutomationSettingsBtn.classList.toggle('hidden', status === 'granted');
+  }
+
+  let permissionPollCount = 0;
+  async function pollPermissionStatus() {
+    try {
+      const { status } = await API.request('/api/photos_backup/permission_status');
+      updatePermissionStatusUI(status);
+      // Keep checking while the system prompt is still up (or freshly
+      // dismissed) so the status updates live without the user having to
+      // reopen Settings -- capped so this doesn't poll forever.
+      if (status === 'undetermined' && permissionPollCount < 40) {
+        permissionPollCount += 1;
+        setTimeout(pollPermissionStatus, 3000);
+      }
+    } catch (e) {
+      photosPermissionStatus.textContent = e.message;
+    }
+  }
+
+  refreshPhotosBackupSettings().then((settings) => {
+    // Only probe permission status automatically if the feature is already
+    // enabled -- merely opening Settings shouldn't trigger the system
+    // Automation prompt for a feature nobody turned on yet.
+    if (settings.enabled) {
+      pollPermissionStatus();
+    } else {
+      photosPermissionStatus.textContent = 'Not checked yet';
+      openAutomationSettingsBtn.classList.add('hidden');
+    }
+  });
+  refreshPhotosBackupLog();
+
+  openAutomationSettingsBtn.addEventListener('click', () => {
+    window.pywebview.api.open_automation_settings();
   });
 
-  copyTokenBtn.addEventListener('click', async () => {
-    const token = await window.pywebview.api.get_pairing_token();
-    tokenBox.textContent = token;
-    copyToClipboard(token, copyTokenBtn);
+  savePollIntervalBtn.addEventListener('click', async () => {
+    const minutes = parseInt(pollIntervalInput.value, 10);
+    try {
+      await API.request('/api/photos_backup/poll_interval', { method: 'PUT', json: { minutes } });
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+
+  photosBackupToggle.addEventListener('click', async () => {
+    const enabling = !photosBackupToggle.classList.contains('on');
+    if (enabling) {
+      const confirmed = confirm(
+        'Automatic Photos Backup will upload new photos to Telegram, and once a backup is '
+        + 'confirmed, delete them from your Photos library. Deleted photos go to Recently Deleted '
+        + '(Apple’s 30-day safety window) — iCloud storage frees automatically after that, '
+        + 'or immediately if you empty Recently Deleted yourself. Are you sure?'
+      );
+      if (!confirmed) return;
+    }
+    try {
+      await API.request('/api/photos_backup/enable', { method: 'PUT', json: { enabled: enabling } });
+      photosBackupToggle.classList.toggle('on', enabling);
+      if (enabling) {
+        permissionPollCount = 0;
+        pollPermissionStatus();
+      }
+    } catch (e) {
+      alert(e.message);
+    }
   });
 
   saveBtn.addEventListener('click', async () => {
@@ -545,21 +681,6 @@ function initSettingsView() {
     } catch (e) {
       alert(e.message);
     }
-  });
-
-  tsToggle.addEventListener('click', async () => {
-    const enabled = !tsToggle.classList.contains('on');
-    await API.request('/api/settings/tailscale_access', { method: 'PUT', json: { enabled } });
-    tsToggle.classList.toggle('on', enabled);
-  });
-
-  revealBtn.addEventListener('click', async () => {
-    tokenBox.textContent = await window.pywebview.api.get_pairing_token();
-  });
-
-  rotateBtn.addEventListener('click', async () => {
-    if (!confirm('Rotate the pairing token? Any device using the old token (e.g. your iOS Shortcut) will need to be updated.')) return;
-    tokenBox.textContent = await window.pywebview.api.rotate_pairing_token();
   });
 
   const syncBtn = document.getElementById('btn-sync');
@@ -576,8 +697,8 @@ function initSettingsView() {
   const logoutBtn = document.getElementById('btn-logout');
   logoutBtn.addEventListener('click', async () => {
     if (!confirm(
-      'Log out of Telegram? This clears the local index on this Mac (nothing in Telegram itself '
-      + 'is touched) and signs you out -- you\'ll need to sign back in.'
+      'Log out of Telegram? Your library stays indexed on this Mac and nothing in Telegram is '
+      + 'touched -- signing back in with the same number picks up where you left off.'
     )) return;
     logoutBtn.disabled = true;
     try {
@@ -597,6 +718,10 @@ function initSettingsView() {
 // module) -- wired once via initLightboxChrome(), called from boot() below.
 
 function closeLightbox() {
+  // Cancels a still-in-flight prepare (e.g. a video not yet fully
+  // downloaded) instead of letting it keep pulling the full file in the
+  // background just because the lightbox closed.
+  if (LIGHTBOX_OWNER && LIGHTBOX_OWNER.cancelActivePrepare) LIGHTBOX_OWNER.cancelActivePrepare();
   document.getElementById('lightbox-overlay').classList.add('hidden');
   document.getElementById('lightbox-media').innerHTML = '';
   LIGHTBOX_OWNER = null;

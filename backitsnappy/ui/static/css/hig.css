@@ -248,6 +248,25 @@ html, body {
 .btn:disabled { opacity: 0.4; cursor: default; }
 .btn-full { width: 100%; }
 
+/* --- Inline spinner -- for buttons whose action can take a while (e.g.
+   verifying a login code, which may trigger a full local-index rebuild)
+   so "nothing is happening" doesn't read as broken/frozen. --- */
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  margin-right: var(--space-2);
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+.btn-secondary .spinner, .btn-destructive .spinner {
+  border-color: rgba(0, 122, 255, 0.25);
+  border-top-color: var(--system-blue);
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* --- Text fields --- */
 .field { margin-bottom: var(--space-4); }
 .field label {

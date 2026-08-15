@@ -312,10 +312,32 @@ async function albumConfirmDeleteFile(fileId) {
 }
 
 function openAlbumLightbox(index) {
-  LIGHTBOX_OWNER = { lightboxPrev: _albumLightboxPrev, lightboxNext: _albumLightboxNext };
+  LIGHTBOX_OWNER = {
+    lightboxPrev: _albumLightboxPrev,
+    lightboxNext: _albumLightboxNext,
+    cancelActivePrepare: _albumCancelActivePrepare,
+  };
   ALBUM_GALLERY.lightboxIndex = index;
   document.getElementById('lightbox-overlay').classList.remove('hidden');
   showAlbumLightboxFile();
+}
+
+// Tracks whichever prepare (download-for-viewing) job is currently in
+// flight for the open lightbox, so closing it or navigating to a
+// different file can cancel a still-running download instead of letting
+// it keep pulling the full file in the background for nothing.
+let ACTIVE_PREPARE = null; // { fileId, jobId } | null
+
+function _albumCancelActivePrepare() {
+  if (!ACTIVE_PREPARE || !ACTIVE_PREPARE.jobId) {
+    ACTIVE_PREPARE = null;
+    return;
+  }
+  const { fileId, jobId } = ACTIVE_PREPARE;
+  ACTIVE_PREPARE = null;
+  // Best-effort, fire-and-forget -- a job that already finished (or
+  // whose file was deleted) 404s here, which is fine to ignore.
+  API.request(`/api/files/${fileId}/download/${jobId}/cancel`, { method: 'POST' }).catch(() => {});
 }
 
 // Prefixed, not `lightboxPrev`/`lightboxNext` -- see gallery.js's comment
@@ -334,28 +356,65 @@ function _albumLightboxNext() {
 function showAlbumLightboxFile() {
   const file = ALBUM_GALLERY.files[ALBUM_GALLERY.lightboxIndex];
   if (!file) return;
+  _albumCancelActivePrepare(); // navigating away from whichever file was still downloading
   document.getElementById('lightbox-title').textContent = file.filename;
   const mediaEl = document.getElementById('lightbox-media');
-  mediaEl.innerHTML = '<div class="lightbox-loading">Loading&hellip;</div>';
 
-  API.request(`/api/files/${file.id}/prepare`, { method: 'POST' })
-    .then(({ job_id }) => pollJobProgress(
-      `/api/files/${file.id}/download/${job_id}/progress`,
-      (job) => {
-        const el = mediaEl.querySelector('.lightbox-loading');
-        if (el) el.textContent = `Loading… ${job.percent || 0}%`;
-      },
-    ))
-    .then(() => {
-      if (ALBUM_GALLERY.files[ALBUM_GALLERY.lightboxIndex] !== file) return; // navigated away
-      const url = `/api/files/${file.id}/media?token=${encodeURIComponent(PAIRING_TOKEN)}`;
-      mediaEl.innerHTML = file.media_type === 'video'
-        ? `<video src="${url}" controls autoplay></video>`
-        : `<img src="${url}" alt="${escapeHTML(file.filename)}">`;
-    })
-    .catch((e) => {
-      mediaEl.innerHTML = `<div class="lightbox-error">${escapeHTML(e.message)}</div>`;
-    });
+  // Video streams straight from Telegram via ranged reads -- no /prepare,
+  // no full download, no local cache write. Playback starts immediately
+  // and seeking just issues new Range requests, same as any HTML5 video.
+  // Images stay on /prepare + /media: they're small enough that a full
+  // local copy is cheap, and it means the <img> keeps working if you
+  // reopen it without needing the network again.
+  if (file.media_type === 'video') {
+    const url = `/api/files/${file.id}/stream?token=${encodeURIComponent(PAIRING_TOKEN)}`;
+    // Starts muted and stays muted -- autoplaying with sound on every
+    // video someone opens is more surprising than welcome; the native
+    // controls' mute button is right there for anyone who wants sound.
+    mediaEl.innerHTML = `<video src="${url}" controls autoplay muted playsinline></video>`;
+    const videoEl = mediaEl.querySelector('video');
+    // The bare `autoplay` attribute alone doesn't reliably start playback
+    // inside pywebview's embedded WKWebView on macOS -- unlike a real
+    // Safari/Chrome tab, it doesn't always treat an autoplay-attribute
+    // video as exempt from its "needs a user action" media policy. An
+    // explicit .play() call does count as that user action, but only if
+    // it runs synchronously inside the click handler that opened this
+    // lightbox (the call chain here is: gallery cell click ->
+    // openAlbumLightbox -> showAlbumLightboxFile, all synchronous) -- if
+    // it were deferred behind a promise/await first, WebKit would no
+    // longer consider it gesture-triggered and would silently ignore it.
+    videoEl.play().catch(() => {});
+    // No separate thumbnail request needed here anymore -- /stream itself
+    // opportunistically captures a thumbnail from the same bytes it's
+    // fetching for playback (see routes_media.py), so opening the video
+    // is all it takes.
+  } else {
+    mediaEl.innerHTML = '<div class="lightbox-loading">Loading&hellip;</div>';
+    API.request(`/api/files/${file.id}/prepare`, { method: 'POST' })
+      .then(({ job_id }) => {
+        if (ALBUM_GALLERY.files[ALBUM_GALLERY.lightboxIndex] === file) {
+          ACTIVE_PREPARE = { fileId: file.id, jobId: job_id };
+        }
+        return pollJobProgress(
+          `/api/files/${file.id}/download/${job_id}/progress`,
+          (job) => {
+            const el = mediaEl.querySelector('.lightbox-loading');
+            if (el) el.textContent = `Loading… ${job.percent || 0}%`;
+          },
+        );
+      })
+      .then(() => {
+        ACTIVE_PREPARE = null; // finished -- nothing left to cancel
+        if (ALBUM_GALLERY.files[ALBUM_GALLERY.lightboxIndex] !== file) return; // navigated away
+        const url = `/api/files/${file.id}/media?token=${encodeURIComponent(PAIRING_TOKEN)}`;
+        mediaEl.innerHTML = `<img src="${url}" alt="${escapeHTML(file.filename)}">`;
+      })
+      .catch((e) => {
+        ACTIVE_PREPARE = null; // errored (or was cancelled) -- nothing left to cancel
+        if (ALBUM_GALLERY.files[ALBUM_GALLERY.lightboxIndex] !== file) return; // navigated away
+        mediaEl.innerHTML = `<div class="lightbox-error">${escapeHTML(e.message)}</div>`;
+      });
+  }
 
   document.getElementById('btn-lightbox-download').onclick = () => albumQuickDownload(file.id);
   document.getElementById('btn-lightbox-save-as').onclick = () => albumSaveAs(file);
@@ -476,7 +535,7 @@ function initAlbumGallery() {
       if (result.method === 'direct') {
         resultEl.textContent = `Added @${username} directly.`;
       } else {
-        resultEl.innerHTML = `@${username} couldn't be added directly (their privacy settings block it) — share this invite link instead:
+        resultEl.innerHTML = `@${escapeHTML(username)} couldn't be added directly (their privacy settings block it) — share this invite link instead:
           <div class="invite-link-box">${escapeHTML(result.invite_link)}</div>`;
       }
       inviteInput.value = '';

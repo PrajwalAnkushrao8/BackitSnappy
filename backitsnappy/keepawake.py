@@ -14,6 +14,8 @@ unwanted surprise.
 import asyncio
 import logging
 
+from .photos_automation import _applescript_string
+
 logger = logging.getLogger(__name__)
 
 # A phone-sourced batch arrives as one independent HTTP request per file,
@@ -33,7 +35,12 @@ _pending_stop: asyncio.Task | None = None
 
 
 async def _notify(message: str) -> None:
-    script = f'display notification "{message}" with title "BackitSnappy"'
+    # Quote the message properly even though both current call sites pass
+    # fixed literals: this builds AppleScript source, and AppleScript can
+    # reach `do shell script`, so the day someone passes a filename (or any
+    # other outside string) through here, raw interpolation would turn a
+    # notification into arbitrary code execution.
+    script = f'display notification {_applescript_string(message)} with title "BackitSnappy"'
     try:
         await asyncio.create_subprocess_exec("osascript", "-e", script)
     except Exception:

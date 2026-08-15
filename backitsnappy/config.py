@@ -13,12 +13,30 @@ DB_PATH = APP_SUPPORT_DIR / "backitsnappy.db"
 
 DEFAULTS = {
     "local_port": 8765,
-    "tailscale_port": 8766,
     "storage_channel_id": None,
     "iphone_backup_album_id": None,
     "watch_folder": None,
-    "tailscale_access_enabled": False,
     "onboarding_completed": False,
+    "photos_backup_enabled": False,
+    "photos_backup_poll_interval_minutes": 10,
+    "photos_backup_album_id": None,
+    "last_authorized_user_id": None,
+    # Digits-only phone key (see client_manager._phone_key) of whoever is
+    # currently/last signed in -- looked up against db's api_credentials
+    # table on every app launch to reconnect with the same api_id/api_hash
+    # that created the saved session. Survives logout (see
+    # TelegramManager.logout) so the same-account-relogin fast path and
+    # this reconnect-on-launch path both keep working.
+    "last_authorized_phone": None,
+    "media_cache_max_bytes": 5 * 1024**3,
+    # See TelegramManager.backfill_video_thumbnails -- flips to True once
+    # a full pass over every already-synced video has completed, so it
+    # never repeats. Not account-scoped on purpose: even after
+    # _reset_for_new_account wipes the file index for a genuine account
+    # switch, there's nothing left to backfill until a new sync populates
+    # it, and this flag being stale-True in that window is harmless (the
+    # candidate list would just be empty anyway).
+    "thumbnail_backfill_done": False,
 }
 
 _lock = threading.Lock()

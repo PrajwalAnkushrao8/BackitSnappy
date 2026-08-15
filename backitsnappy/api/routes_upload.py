@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from .. import db
+from .. import db, media
 from ..telegram.client_manager import TelegramManager
 from .deps import get_manager
 
@@ -21,7 +21,11 @@ async def upload(
     manager: TelegramManager = Depends(get_manager),
 ):
     UPLOAD_TMP_DIR.mkdir(parents=True, exist_ok=True)
-    dest = UPLOAD_TMP_DIR / f"{uuid.uuid4().hex}_{file.filename}"
+    # The uuid prefix only guards the *first* path segment -- once the
+    # client-supplied filename contains separators, everything after them
+    # is honored and the write lands outside UPLOAD_TMP_DIR entirely.
+    safe_name = media.safe_filename(file.filename)
+    dest = UPLOAD_TMP_DIR / f"{uuid.uuid4().hex}_{safe_name}"
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 

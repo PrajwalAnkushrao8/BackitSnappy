@@ -26,11 +26,11 @@ up. That means:
   your code in, it's not really Telegram.
 - **Periodically check Active Sessions** (Settings → Devices in the
   Telegram app) and log out anything you don't recognize.
-- This app's own local pieces (the Keychain-stored session/credentials, the
-  pairing token, the Tailscale-only network listener) are all designed to
-  keep your *Mac* secure — but none of that matters if your underlying
-  Telegram account itself is compromised. Telegram account security is the
-  actual foundation everything else sits on.
+- This app's own local pieces (the Keychain-stored session and credentials,
+  the pairing token, the loopback-only listener) are all designed to keep
+  your *Mac* secure — but none of that matters if your underlying Telegram
+  account itself is compromised. Telegram account security is the actual
+  foundation everything else sits on.
 
 With that said, here's how to get set up.
 
@@ -44,7 +44,10 @@ That's it — `run.sh` handles the rest, including ffmpeg (used for video
 thumbnails), which is installed automatically as a Python dependency. No
 separate `brew install` step needed.
 
-## 2. Get Telegram API credentials (one-time, every Telegram app needs this)
+## 2. Get Telegram API credentials (one-time per phone number)
+
+Every app that talks to Telegram's API needs its own credentials — this is
+Telegram's requirement, not BackitSnappy's.
 
 1. Go to https://my.telegram.org/apps (or use the "Open my.telegram.org/apps"
    button that appears in the app's own setup screen in step 4 below — same
@@ -56,8 +59,14 @@ separate `brew install` step needed.
    letters/numbers). Keep this page open, or copy both values somewhere —
    you'll paste them into BackitSnappy in a minute.
 
-This is a one-time step tied to your Telegram account, not something you'll
-need to repeat.
+BackitSnappy binds these to the phone number you sign in with and remembers
+them, so **you'll only ever be asked once per number**. Sign out and back in
+with the same number and it goes straight to the login code.
+
+If you later sign in with a *different* phone number, you'll be asked for
+credentials again for that number. Each `api_id` can only be bound to one
+number — reusing one that already belongs to another number is refused, so two
+accounts can never quietly share an app identity.
 
 ## 3. Run the app
 
@@ -73,9 +82,11 @@ here needs a browser.
 
 ## 4. First-launch wizard
 
-1. **Connect Telegram** — paste in the `api_id` and `api_hash` from step 2.
-2. **Sign in** — enter your phone number, with country code (e.g.
+1. **Sign in** — enter your phone number first, with country code (e.g.
    `+15551234567`).
+2. **Connect Telegram** — shown only if this app hasn't seen that number
+   before. Paste in the `api_id` and `api_hash` from step 2. There's a
+   "← Use a different number" button here if you mistyped the number.
 3. **Enter code** — Telegram sends the login code as a message *inside the
    Telegram app itself* (usually to a device you're already signed into),
    not as a text message. Check there.
@@ -84,17 +95,21 @@ here needs a browser.
 
 Your session is saved to the macOS Keychain after this — you won't need to
 sign in again on future launches, unless you manually log the session out
-from Telegram itself (see [README's session-recovery notes](README.md) if
-that happens — nothing is lost, you just sign back in).
+from Telegram itself (nothing is lost if that happens; you just sign back in).
 
 ## 5. What happens automatically after you sign in
 
 - A private **"BackitSnappy Storage"** channel is created on your Telegram
   account — this is where general backups (not in any specific album) land.
-- A private **"iPhone Backup"** album is created — a stable, dedicated
-  destination for your iPhone Shortcut to upload into (see step 7).
+- Any BackitSnappy channels **already on your account** are discovered and
+  indexed, so signing in on a new Mac (or after signing out) brings your whole
+  library back without re-uploading anything.
 - A short, skippable **welcome tour** walks through the Albums tab and
   Settings. Replay it anytime from Settings → Help.
+
+Only file *metadata* is indexed during this pass, not the files themselves —
+so it's fast even for a large library, and your Mac's disk usage stays bounded
+regardless of how much is stored in Telegram (see step 8).
 
 ## 6. Set up Mac auto-backup (optional)
 
@@ -109,91 +124,56 @@ another app or script already saves files (a screenshots folder, a
 scanner's output, an export folder), and everything that lands there gets
 backed up on its own.
 
-## 7. Set up iPhone auto-backup (optional)
+## 7. Turn on Automatic Photos Backup (optional)
 
-> **Photos only, not videos.** The Shortcut reliably backs up photos.
-> Video files consistently fail to attach through iOS Shortcuts' photo
-> picker — this turned out to be a genuine platform limitation, not a
-> configuration problem (several different approaches were tried). For
-> videos, connect your iPhone to your Mac and drag the video into an album
-> directly in the app instead — that path always works. See
-> [Troubleshooting](USAGE.md#troubleshooting) for the full story.
+This is the feature that actually frees up space: BackitSnappy watches your
+macOS Photos library, uploads anything new to Telegram, and then removes it
+from Photos.
 
-### 7a. Install and sign in to Tailscale on your Mac
+1. Open **Settings → Automatic Photos Backup**.
+2. Set **"Check for new photos every"** to whatever interval suits you
+   (default 10 minutes, minimum 5).
+3. Flip **"Enable Automatic Photos Backup"** on.
+4. macOS will ask for **Automation permission** for Photos.app the first time
+   it runs. You must allow this — the feature can't read your library
+   otherwise. If you dismissed the prompt, re-enable it under **System
+   Settings → Privacy & Security → Automation → BackitSnappy → Photos**;
+   the Settings panel has a button that opens that page directly.
 
-1. Download Tailscale from [tailscale.com/download](https://tailscale.com/download)
-   (or the Mac App Store).
-2. Open it — it adds a small icon to your menu bar.
-3. Click the menu bar icon → **Log In**. This opens your browser to sign in
-   (Google, Microsoft, GitHub, email, or passkey all work).
-4. Once signed in, the menu bar icon should show your Mac as **Connected**.
+**What "deletes them from Photos" actually means:** items are moved to Photos'
+own **Recently Deleted**, Apple's 30-day safety window. Nothing is destroyed
+immediately, and you can restore anything from there. iCloud storage frees up
+once that window passes, or right away if you empty Recently Deleted yourself.
 
-### 7b. Install and sign in to Tailscale on your iPhone
+The upload is always confirmed *before* the delete — an item is never removed
+from Photos unless it's verifiably in Telegram first.
 
-1. Install **Tailscale** from the App Store.
-2. Open it and tap **Get Started** / **Log In**.
-3. Sign in with **the exact same account** you used on your Mac — this is
-   what puts both devices on the same private network (your "tailnet").
-4. iOS will ask permission to add a VPN configuration — this is expected
-   and required; allow it.
-5. Confirm it shows **Connected** in the app.
+> **Known limitation in v0.2.0:** on some libraries the delete step fails with
+> an AppleEvent error (`-10000`). The upload half works correctly, so nothing
+> is lost — affected items are backed up but remain in your Photos library.
+> This is under investigation; see [USAGE.md](USAGE.md#troubleshooting).
 
-To double check both devices are actually on the same tailnet: open
-Tailscale on either one and look at its device list — your Mac and iPhone
-should both appear there, each with a `100.x.x.x` address.
+Turning the toggle off stops the whole loop immediately. It's off by default,
+and it's the only feature in the app that deletes anything from Photos.
 
-### 7c. Turn on Tailscale access in BackitSnappy
+## 8. Set your local cache limit (optional)
 
-In **Settings**, turn on "Allow uploads over Tailscale," then restart the
-app (a one-time requirement after toggling this).
+Your Telegram library can be far bigger than your Mac's disk — BackitSnappy
+only keeps a bounded local cache, not a full copy.
 
-### 7d. Get your Shortcut's setup values
+**Settings** shows what the app is currently using, split into database,
+thumbnails, and cached media. Set **"Max local cache size"** to whatever you're
+willing to give it (default 5 GB). When cached media exceeds that, the
+least-recently-opened files are deleted first; they re-download automatically
+the next time you open them.
 
-Open **Settings → iOS Shortcut setup** — it shows everything the Shortcut
-needs, each with a Copy button: the **Upload URL** (auto-detected from your
-Mac's current Tailscale IP), your **Pairing Token**, and the **iPhone
-Backup Album ID**.
-
-### 7e. Import and set up the Shortcut
-
-1. On your iPhone, open the import link:
-   **https://www.icloud.com/shortcuts/cf76c9d6cbb14d8da6297d0a95ff15be**
-   and tap **Add Shortcut** in the Shortcuts app.
-2. **Before running it the first time, edit it** to fill in your own
-   values — the imported Shortcut ships with placeholder text, not a live
-   prompt, so this is a one-time manual edit, not something it asks you for
-   automatically:
-
-   ![The imported Shortcut's Get Contents of URL action, showing placeholder text in the URL, X-Pairing-Token header, and album_id field](images/shortcut-setup.png)
-
-   - Tap the URL field (showing `type/ your url`) and replace it with the
-     **Upload URL** from Settings → iOS Shortcut setup (step 7d).
-   - Tap the `X-Pairing-Token` header value (showing `type your sh...`) and
-     replace it with your **Pairing Token**.
-   - Tap the `album_id` field (showing `type your alb...`) and replace it
-     with your **iPhone Backup Album ID**.
-   - Leave `file` as-is — it's already correctly bound to the photo you
-     select.
-3. These values are saved as part of the Shortcut once you set them — you
-   won't need to re-edit it on every run. You *will* need to update it again
-   if you ever rotate your pairing token, or if your Mac's Tailscale IP
-   changes and Settings shows a different Upload URL after hitting
-   "Refresh."
-4. Run it by opening the Shortcuts app and tapping it, adding it to your
-   Home Screen as its own icon for one-tap access, or (if you name it
-   something recognizable) triggering it by voice via Siri.
-5. It selects photo(s) via the Photos picker — make sure **Settings →
-   Privacy & Security → Photos → Shortcuts** is set to **Full Access** first,
-   or the picker can silently fail to hand over what you selected.
-6. There's no progress bar on the phone itself — it's a background upload.
-   Check the **Albums → iPhone Backup** folder in the app afterward to
-   confirm things arrived, or watch for the "keeping your Mac awake"
-   notification, which confirms an upload is actively in progress.
+Thumbnails are never evicted — they're tiny, and they're what makes browsing
+work without pulling full files.
 
 ## You're done
 
 At this point BackitSnappy is fully set up: Telegram connected, your Storage
-channel and iPhone Backup album created, and (if you set them up) both
-auto-backup paths running. Everything from here is day-to-day use — see
-[USAGE.md](USAGE.md) for how Albums, sharing, downloads, and sync actually
-work, plus a troubleshooting section for common iOS Shortcut issues.
+channel created, your existing albums indexed, and whichever backup paths you
+chose running. Everything from here is day-to-day use — see
+[USAGE.md](USAGE.md) for how Albums, sharing, video playback, downloads, and
+sync work, plus troubleshooting.

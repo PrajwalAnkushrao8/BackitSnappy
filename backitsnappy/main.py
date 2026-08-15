@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pillow_heif
 
-from . import config, db, keepawake
+from . import config, db, keepawake, photos_backup
 from .api.server import create_app, run_servers
 from .telegram.auth_flow import AuthState
 from .telegram.client_manager import TelegramManager
@@ -72,10 +72,12 @@ def _run_background(
 
         stop_event = asyncio.Event()
         stop_event_holder["event"] = stop_event
+        photos_backup_task = asyncio.create_task(photos_backup.poll_loop(manager, stop_event))
 
         await run_servers(app, stop_event, on_local_ready=local_ready.set)
 
         watcher_controller.stop()
+        await photos_backup_task
         await keepawake.shutdown()
         await manager.disconnect()
 

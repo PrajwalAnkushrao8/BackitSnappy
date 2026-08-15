@@ -3,8 +3,8 @@ from enum import Enum
 
 
 class AuthState(str, Enum):
-    NEEDS_CREDENTIALS = "needs_credentials"  # no api_id/api_hash saved yet
-    NEEDS_PHONE = "needs_phone"              # have credentials, not signed in
+    NEEDS_PHONE = "needs_phone"              # first screen: not signed in, no phone entered yet
+    NEEDS_CREDENTIALS = "needs_credentials"  # phone entered, but it has no api_id/api_hash bound yet
     NEEDS_CODE = "needs_code"                # login code requested, awaiting entry
     NEEDS_PASSWORD = "needs_password"        # 2FA password required
     AUTHORIZED = "authorized"

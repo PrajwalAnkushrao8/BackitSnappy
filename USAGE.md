@@ -9,8 +9,8 @@ guide assumes you're already through the first-launch wizard.
 Two tabs in the sidebar:
 
 - **Albums** — everything lives here. Every backup, organized into folders.
-- **Settings** — your Telegram connection, backup automation, the iOS
-  Shortcut setup, and account controls.
+- **Settings** — backup automation (watched folder and Photos), local storage
+  usage, sync, and account controls.
 
 ## Albums
 
@@ -44,10 +44,9 @@ pick files via the native file picker.
 - Duplicate content (by file hash, not filename) is **automatically
   deduplicated** — dropping the same file twice, or a file that's already in
   another album, doesn't re-upload it or waste Telegram bandwidth.
-- If your Mac goes to sleep mid-upload (rare for local drag-drop, more
-  relevant for the iPhone Shortcut flow below), a **persistent queue**
-  resumes any not-yet-finished uploads automatically the next time the app
-  starts.
+- If your Mac goes to sleep mid-upload, or the app quits, a **persistent
+  queue** resumes any not-yet-finished uploads automatically the next time
+  the app starts.
 
 ### Viewing a file
 
@@ -61,6 +60,23 @@ Click any thumbnail to open it full-size in the lightbox:
 - **Delete** removes it from both Telegram and the local index.
 - **Esc**, clicking outside the image, or the **Close** button all dismiss
   it.
+
+### Watching a video
+
+Videos **stream** rather than download. Click one and it starts playing right
+away, pulling only the parts needed as you watch — you can open a 2GB clip
+without waiting for a 2GB transfer, and seeking just fetches from the new
+position. Nothing is written to your cache by streaming.
+
+Playback starts **muted** so opening a video never blasts audio unexpectedly;
+use the player's own volume control to unmute.
+
+Closing the lightbox stops the transfer immediately. (Images still download
+fully before display — they're small enough that a complete local copy is
+cheaper than streaming, and it means reopening one needs no network at all.)
+
+Videos without a thumbnail get one generated in the background after your
+first sign-in on this version — see [Good to know](#good-to-know).
 
 ### Downloading
 
@@ -106,24 +122,32 @@ into subfolders too) uploaded automatically — see the
 [README](README.md#auto-backup-from-your-mac) for the full explanation of
 how the file-system watching works.
 
-### iPhone access (Tailscale)
+### Automatic Photos Backup
 
-Turn this on to open a second listener bound to your Mac's Tailscale IP,
-letting your iPhone upload directly. Requires restarting the app after
-toggling it.
+Polls your macOS Photos library on a schedule, uploads anything new, and then
+moves it to Photos' **Recently Deleted** (Apple's 30-day safety window) — so
+your iCloud storage frees up without anything being destroyed outright.
 
-### iOS Shortcut setup
+- **Status** shows whether a poll cycle is running right now.
+- **Automation permission** shows whether macOS has granted access to
+  Photos.app, with a button that opens the right System Settings page.
+- **Check for new photos every** sets the interval (5–120 minutes).
+- **Enable Automatic Photos Backup** is the master switch. Off by default.
+- **Recent Photos Backups** below lists what's been backed up so far.
 
-Once Tailscale access is on, this card shows the three values your iPhone
-Shortcut needs, each with a **Copy** button:
+The upload is confirmed before anything is deleted — an item never leaves your
+library unless it's verifiably in Telegram first. See
+[SETUP.md §7](SETUP.md#7-turn-on-automatic-photos-backup-optional), and the
+known `-10000` delete limitation in [Troubleshooting](#troubleshooting).
 
-- **Upload URL** — auto-detected from your current Tailscale IP; hit
-  **Refresh** if it ever changes (e.g. after reconnecting to Tailscale).
-- **Pairing Token** — tap **Reveal** first, then **Copy**. You can also
-  **Rotate token** here if you ever need to invalidate the old one (any
-  device using it, including your Shortcut, will need updating afterward).
-- **iPhone Backup Album ID** — the auto-created album your phone's uploads
-  land in by default.
+### Storage used on this Mac
+
+Shows what BackitSnappy is using locally, split into database, thumbnails, and
+cached media, plus a **Max local cache size** you can set.
+
+Your Telegram library can be much larger than your disk — only the cache lives
+here. Once it exceeds the limit, the least-recently-opened files are removed
+first and re-download on demand. Thumbnails are never evicted.
 
 ### Sync
 
@@ -143,71 +167,68 @@ batch finishes.
 
 ### Account
 
-**Log Out** signs this Mac out of Telegram and clears the local index (your
-`api_id`/`api_hash` are kept, so signing back in skips straight to the
-phone-number step). Nothing in Telegram itself is touched — logging back
-into an account that had BackitSnappy content on it automatically rebuilds
-the local index by rediscovering its existing channels. Useful for handing
-the Mac to someone else, or connecting a different Telegram account.
+**Log Out** signs this Mac out of Telegram. Nothing in Telegram itself is
+touched, and — as of v0.2.0 — **your local index is kept**, so signing back in
+with the same number is instant rather than triggering a full re-sync. Your
+`api_id`/`api_hash` stay bound to that number too, so you go straight to the
+login code.
+
+Signing in with a **different** Telegram account is detected automatically, and
+*that* is when the local index is cleared and account-scoped settings
+(auto-backup folder, Automatic Photos Backup) are reset to off. This is
+deliberate: those settings upload and delete on their own, and must never
+silently carry over to someone else's account.
 
 ## Good to know
 
-- **The iPhone Shortcut backs up photos, not videos.** This isn't a
-  configuration issue — video files consistently fail to attach through
-  iOS Shortcuts' photo picker no matter how the Shortcut is built (see
-  [Troubleshooting](#troubleshooting) for what was tried). For videos:
-  connect your iPhone to your Mac and drag the video into an album directly
-  in the app — that path is fully reliable.
+- **Videos stream; images download.** Opening a video starts playback almost
+  immediately and transfers only what you watch. Images are fetched in full
+  first, so reopening one later needs no network.
+- **Thumbnails are backfilled once.** After upgrading to v0.2.0, the app makes
+  a one-time background pass over videos that have no thumbnail, reading just
+  the start and end of each file rather than downloading it. It's paced
+  deliberately slowly so it never competes with what you're actively doing,
+  and it resumes safely if you quit mid-way.
 - **File size limits follow your Telegram account**: 2GB per file normally,
   4GB with Telegram Premium — detected automatically after sign-in. A file
   over the limit fails with a clear message rather than a raw error.
+- **Duplicate detection doesn't need the whole file.** Files are fingerprinted
+  from their first and last 64KB plus exact byte size, so re-adding something
+  already stored is recognized without re-downloading it.
 - **Every install is fully isolated** — see the
   [README's security section](README.md#security) for what that means.
-- **Auto-sync after a phone batch** deliberately waits ~45 seconds after the
-  last upload before running, so a burst of individual photo uploads
-  doesn't trigger it repeatedly mid-batch.
 
 ## Troubleshooting
 
-Real issues found while building and testing this, most relevant to the
-iOS Shortcut flow:
+**Automatic Photos Backup uploads but doesn't delete (`-10000`)** — a known
+limitation in v0.2.0. The upload half completes correctly, so nothing is at
+risk; affected items stay in your Photos library instead of moving to Recently
+Deleted. The failure is an AppleEvent error from Photos.app's own scripting
+interface and is under investigation. If you want the space back meanwhile,
+delete the backed-up items in Photos manually — the **Recent Photos Backups**
+list in Settings shows exactly what made it to Telegram.
 
-**"Invalid HTTP request received" / the Shortcut times out** — check the
-Shortcut's Headers list for a stray empty row (a `Key`/`Text` placeholder
-that wasn't actually deleted). iOS Shortcuts sometimes sends it as a real,
-blank header, which breaks the request before it's even parsed. Delete the
-empty row.
+**Automatic Photos Backup does nothing at all** — check **Automation
+permission** in Settings. If it says denied or unchecked, macOS never granted
+access to Photos.app. Open **System Settings → Privacy & Security → Automation
+→ BackitSnappy → Photos** (there's a button in Settings that goes straight
+there) and enable it, then toggle the feature off and on.
 
-**"Invalid or missing pairing token"** — the token got truncated when
-copied into the Shortcut's header value (often cut off at the first
-hyphen). Re-copy the full token from Settings → Reveal, and make sure you
-delete the old value completely before pasting, rather than pasting over
-part of it.
+**A video stalls or won't start playing** — playback pulls from Telegram live,
+so it depends on Telegram's responsiveness at that moment. Close and reopen the
+video to start a fresh transfer. If it happens consistently for one specific
+file, use **Download** instead and play it locally.
 
-**A photo/video won't attach — "Field required" or an empty upload** — most
-often a Photos permission issue: in iPhone Settings → Privacy & Security →
-Photos → Shortcuts, make sure it's set to **Full Access**, not "Limited/
-Selected Photos." A Shortcut that only has partial library access can fail
-to hand over files it doesn't have full access to.
+**Thumbnails are missing for some videos** — the one-time backfill described
+above may still be running; it takes a few hours for a large library. Some
+files genuinely can't produce one from a partial read, in which case they stay
+as icon-only until you open them once.
 
-**Videos won't attach through the Shortcut at all** — this is expected;
-see [Good to know](#good-to-know) above. What we actually tried, in order,
-against a real 44MB video that consistently failed: confirming the `file`
-Form field was correctly bound to the selected item (it was), confirming
-Shortcuts' photo picker included videos (it did), fully downloading the
-video in the Photos app first in case "Optimize iPhone Storage" left it as
-an iCloud placeholder (still failed), and inserting an explicit "Get File
-of Type" conversion step before the upload (produced a broken output, or
-an outright conversion error). Every attempt still resulted in either no
-real data being sent or a corrupted attachment — this points to a genuine
-iOS Shortcuts limitation with video attachments in `Get Contents of URL`
-requests, not something fixable through more configuration. Connect your
-iPhone to your Mac and drag the video into the album directly instead;
-that path always works.
+**Uploads seem to stall for hours overnight** — if your Mac sleeps, in-progress
+uploads pause with it. BackitSnappy keeps the Mac awake automatically during
+uploads it initiates, but if you're driving a long batch manually, keeping the
+display awake (`caffeinate -d` in Terminal) avoids this.
 
-**Uploads seem to stall for hours overnight** — if your Mac goes to sleep,
-the browser-driven upload loop (for local drag-drop uploads) pauses with
-it. Keeping the lid open/display awake (`caffeinate -d` in Terminal, or just
-not letting it sleep) avoids this. Phone uploads via the Shortcut don't have
-this problem — BackitSnappy automatically keeps the Mac awake for the
-duration of any phone-sourced upload.
+**The local index doesn't match Telegram** — hit **Sync with Telegram** in
+Settings. This reconciles both directions: it drops entries for anything
+deleted directly in Telegram, and imports anything added there outside the app.

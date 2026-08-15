@@ -22,12 +22,8 @@ const TOUR_STEPS = [
     body: 'Your Telegram session and connection status live here. Your per-file upload limit (2GB or 4GB, based on your account) is detected automatically.',
   },
   {
-    title: 'Settings -- iPhone access (Tailscale)',
-    body: 'Turn this on to let your iPhone upload directly to BackitSnappy over your own private Tailscale network -- nothing is exposed to the public internet.',
-  },
-  {
-    title: 'Settings -- iOS Shortcut setup',
-    body: 'Once Tailscale access is on, this section shows the Upload URL, Pairing Token, and Album ID your iPhone Shortcut needs -- each with a Copy button, ready to paste in.',
+    title: 'Settings -- Automatic Photos Backup',
+    body: 'Turn this on and BackitSnappy polls Photos.app directly -- no iPhone setup needed. New photos upload to Telegram, then move to Recently Deleted once backed up.',
   },
 ];
 

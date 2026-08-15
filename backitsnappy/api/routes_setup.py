@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..telegram.client_manager import TelegramManager
@@ -66,9 +66,14 @@ async def submit_password(body: PasswordIn, manager: TelegramManager = Depends(g
 
 
 @router.post("/logout")
-async def logout(manager: TelegramManager = Depends(get_manager)):
+async def logout(request: Request, manager: TelegramManager = Depends(get_manager)):
     try:
         state = await manager.logout()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # manager.logout() already reset watch_folder to None in config, but
+    # that doesn't stop an already-running watcher on its own -- without
+    # this, a folder watch started under the old account would keep
+    # uploading anything dropped in it to whichever account logs in next.
+    request.app.state.watcher_controller.restart(None)
     return {"state": state.value}

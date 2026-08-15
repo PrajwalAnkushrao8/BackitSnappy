@@ -2,6 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- Defense in depth for the UI layer. The two directives doing the real
+       work here are script-src (no 'unsafe-inline', so an injected inline
+       event handler like onload= will not run even if markup escaping fails
+       again) and connect-src 'self' (an injected script cannot reach an
+       outside host to exfiltrate anything).
+
+       Two exemptions, both forced and both narrow:
+       - 'unsafe-eval' -- pywebview's own JS bridge calls eval() internally
+         (webview/dom/element.py); without it the bridge throws EvalError on
+         load and the native API the UI depends on never initializes.
+         Confirmed by testing. It permits eval/new Function only; inline
+         handlers stay blocked, which is the vector that matters here.
+       - 'unsafe-inline' for styles only -- the markup below uses inline
+         style="" attributes. Removing those would let style-src drop to
+         'self'. Scripts get no such exemption. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'" />
   <title>BackitSnappy</title>
   <link rel="stylesheet" href="/css/hig.css" />
 </head>
@@ -30,6 +46,7 @@
           <input type="text" id="input-api-hash" placeholder="0123456789abcdef0123456789abcdef" />
         </div>
         <button class="btn btn-primary btn-full" id="btn-submit-credentials">Continue</button>
+        <button class="btn btn-secondary btn-full" id="btn-back-credentials" style="margin-top: 8px;">&larr; Use a different number</button>
         <div class="wizard-error" id="error-credentials"></div>
       </div>
 
@@ -166,43 +183,74 @@
           </div>
         </div>
 
-        <div class="section-header">iPhone access (Tailscale)</div>
-        <div class="card" style="padding: 16px; display:flex; align-items:center; justify-content: space-between;">
-          <div>
-            <div class="list-row-title">Allow uploads over Tailscale</div>
-            <div class="list-row-subtitle">Restart BackitSnappy after changing this</div>
-          </div>
-          <div class="toggle-track" id="toggle-tailscale"><div class="toggle-thumb"></div></div>
-        </div>
-
-        <div class="section-header">iOS Shortcut setup</div>
+        <div class="section-header">Automatic Photos Backup</div>
         <div class="card" style="padding: 16px;">
           <div class="list-row-subtitle" style="margin-bottom: 12px;">
-            Paste these three values into your iPhone Shortcut the first time it asks -- it remembers
-            them after that.
+            No iPhone setup needed. BackitSnappy polls Photos.app directly, uploads new items to
+            Telegram, and once confirmed, deletes them from Photos &mdash; which moves them to
+            <strong>Recently Deleted</strong>, Apple's own 30-day safety window. iCloud storage frees
+            automatically after that period, or immediately if you empty Recently Deleted yourself.
           </div>
 
-          <div class="list-row-title" style="margin-bottom:4px;">Upload URL</div>
-          <div class="invite-link-box" id="tailscale-url-box">Checking&hellip;</div>
-          <div style="margin-top: 8px; margin-bottom: 16px; display:flex; gap: 8px;">
-            <button class="btn btn-secondary" id="btn-copy-tailscale-url">Copy</button>
-            <button class="btn btn-secondary" id="btn-refresh-tailscale-url">Refresh</button>
+          <div class="list-row" style="border:none; padding: 8px 0;">
+            <div class="list-row-title">Status</div>
+            <div class="list-row-subtitle" id="photos-backup-status">Idle</div>
           </div>
 
-          <div class="list-row-title" style="margin-bottom:4px;">Pairing Token</div>
-          <div class="list-row-subtitle" style="margin-bottom: 8px;">Sent as the <code>X-Pairing-Token</code> header.</div>
-          <div class="invite-link-box" id="pairing-token-box">••••••••••••••••••••••••</div>
-          <div style="margin-top: 8px; margin-bottom: 16px; display:flex; gap: 8px;">
-            <button class="btn btn-secondary" id="btn-reveal-token">Reveal</button>
-            <button class="btn btn-secondary" id="btn-copy-token">Copy</button>
-            <button class="btn btn-destructive" id="btn-rotate-token">Rotate token</button>
+          <div class="list-row" style="border:none; padding: 8px 0; display:flex; align-items:center; justify-content: space-between;">
+            <div>
+              <div class="list-row-title">Automation permission</div>
+              <div class="list-row-subtitle" id="photos-permission-status">Checking&hellip;</div>
+            </div>
+            <button class="btn btn-secondary hidden" id="btn-open-automation-settings">Open Settings</button>
           </div>
 
-          <div class="list-row-title" style="margin-bottom:4px;">iPhone Backup Album ID</div>
-          <div class="list-row-subtitle" style="margin-bottom: 8px;">Sent as the <code>album_id</code> form field so uploads land in a browsable album.</div>
-          <div class="invite-link-box" id="iphone-album-id-box">&mdash;</div>
-          <div style="margin-top: 8px; display:flex; gap: 8px;">
-            <button class="btn btn-secondary" id="btn-copy-album-id">Copy</button>
+          <div class="list-row-title" style="margin: 12px 0 4px;">Check for new photos every</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:16px;">
+            <input type="number" id="input-poll-interval" min="5" max="120" style="width:70px; min-height:36px; border-radius:8px; border:1px solid var(--separator); padding: 0 10px; background: var(--bg-secondary); color: var(--label-primary);" />
+            <span class="list-row-subtitle">minutes</span>
+            <button class="btn btn-secondary" id="btn-save-poll-interval">Save</button>
+          </div>
+
+          <div class="list-row-subtitle" style="margin-bottom: 16px;">
+            Last checked: <span id="photos-last-checked">never</span> &middot;
+            Backed up so far: <span id="photos-backed-up-count">0</span>
+          </div>
+
+          <div class="list-row" style="border:none; padding: 8px 0; display:flex; align-items:center; justify-content: space-between;">
+            <div>
+              <div class="list-row-title">Enable Automatic Photos Backup</div>
+              <div class="list-row-subtitle">Off by default. Deletes photos from your library after a verified backup.</div>
+            </div>
+            <div class="toggle-track" id="toggle-photos-backup"><div class="toggle-thumb"></div></div>
+          </div>
+        </div>
+
+        <div class="section-header">Recent Photos Backups</div>
+        <div class="card" style="padding: 16px;">
+          <div id="photos-backup-log-list" class="list-row-subtitle">No photos backed up yet.</div>
+        </div>
+
+        <div class="section-header">Storage Used on This Mac</div>
+        <div class="card" style="padding: 16px;">
+          <div class="list-row-subtitle" style="margin-bottom: 12px;">
+            Local cache only (thumbnails, cached originals, and the file index) -- not what's stored
+            in Telegram, which has no meaningful limit. Cached originals are deleted automatically
+            (oldest-viewed first) once the limit below is hit; everything is still safe in Telegram
+            and gets re-downloaded the next time you open it.
+          </div>
+          <div class="list-row" style="border:none; padding: 8px 0;">
+            <div class="list-row-title">Total</div>
+            <div class="list-row-subtitle" id="disk-usage-total">Calculating&hellip;</div>
+          </div>
+          <div class="list-row-subtitle" id="disk-usage-breakdown" style="margin-bottom: 12px;"></div>
+          <button class="btn btn-secondary" id="btn-refresh-disk-usage">Refresh</button>
+
+          <div class="list-row-title" style="margin: 16px 0 4px;">Max local cache size</div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" id="input-cache-max-gb" min="1" max="200" step="0.5" style="width:70px; min-height:36px; border-radius:8px; border:1px solid var(--separator); padding: 0 10px; background: var(--bg-secondary); color: var(--label-primary);" />
+            <span class="list-row-subtitle">GB</span>
+            <button class="btn btn-secondary" id="btn-save-cache-max">Save</button>
           </div>
         </div>
 

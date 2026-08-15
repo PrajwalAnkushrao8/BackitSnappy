@@ -4,12 +4,16 @@ Single writer lock serializes writes (SQLite only allows one writer at a
 time anyway); WAL mode lets concurrent readers (FastAPI GET routes) proceed
 without blocking on the writer thread (folder watcher / upload handler).
 """
+import logging
+import os
 import sqlite3
 import threading
 import time
 from pathlib import Path
 
 from . import config
+
+logger = logging.getLogger(__name__)
 
 _write_lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -64,7 +68,98 @@ CREATE TABLE IF NOT EXISTS upload_queue (
     source TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+
+-- Audit trail for the Automatic Photos Backup feature: one row per
+-- exported+confirmed-uploaded file, and one Photos item can be more than
+-- one row -- a Live Photo's original is genuinely two files (the still and
+-- its paired .mov), each uploaded and logged separately (see
+-- photos_backup._process_item). photos_item_id is intentionally not
+-- unique; db.get_processed_photos_item_ids() just needs *a* row to exist
+-- for an item to treat it as already handled.
+CREATE TABLE IF NOT EXISTS photos_backup_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    photos_item_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    telegram_message_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    uploaded_at REAL NOT NULL,
+    deleted_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_photos_backup_log_item_id ON photos_backup_log(photos_item_id);
+
+-- Single-row table (id is always 1) tracking when the poll loop last
+-- actually ran a check -- distinct from any one item's uploaded_at, since a
+-- poll cycle that finds nothing new still needs to move this forward for
+-- Settings' "last checked" display to be honest.
+CREATE TABLE IF NOT EXISTS photos_backup_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_checked_at REAL
+);
+
+-- Every Telegram api_id/api_hash pair this app has ever been set up with,
+-- bound to the phone number it was entered for -- one number, one api_id,
+-- permanently. Enforces that a given api_id can never be reused for a
+-- second, different phone number (see client_manager.set_credentials):
+-- without that, someone could unknowingly log into a second account using
+-- credentials still "remembered" for a first, with no re-confirmation --
+-- the same silent-carryover risk the account-switch index wipe already
+-- guards against, just one layer up. Survives logout and even
+-- wipe_local_index() (a genuine account switch) -- this registry is
+-- permanent app-identity history, not part of any one account's index.
+-- Deliberately holds NO api_hash: that half is the actual secret and lives
+-- in the Keychain (secrets_store.set_api_hash_for_phone), since this file
+-- is plain, unencrypted SQLite under Application Support. An earlier
+-- version of this table did store api_hash here -- see
+-- _migrate_api_hash_to_keychain for the one-time move and cleanup.
+CREATE TABLE IF NOT EXISTS api_credentials (
+    phone_number TEXT PRIMARY KEY,
+    api_id INTEGER NOT NULL UNIQUE,
+    created_at REAL NOT NULL
+);
+
+-- One-time cleanup: the iCloud Offload Folder feature this replaced kept
+-- its own audit table with a local quarantine/purge/restore lifecycle that
+-- no longer applies to anything -- this is unreleased, local-only dev
+-- data, so dropping it beats carrying dead schema forward.
+DROP TABLE IF EXISTS offload_log;
 """
+
+
+def _migrate_api_hash_to_keychain(conn: sqlite3.Connection) -> None:
+    """One-time move of any api_hash still sitting in this file over to the
+    Keychain, then removal of the column.
+
+    A previous version of api_credentials stored api_hash in plaintext
+    here. Creating the table without the column only helps fresh installs
+    -- an existing database keeps the old column (and its contents) until
+    something actively migrates it, which is what this does. VACUUM at the
+    end matters as much as the DROP: without it the old value survives in
+    pages the delete merely freed, still readable with a hex editor."""
+    from . import secrets_store  # local import: secrets_store must not import db
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(api_credentials)")}
+    if "api_hash" not in columns:
+        return
+    rows = conn.execute("SELECT phone_number, api_hash FROM api_credentials").fetchall()
+    for row in rows:
+        if row["api_hash"]:
+            secrets_store.set_api_hash_for_phone(row["phone_number"], row["api_hash"])
+    conn.execute("ALTER TABLE api_credentials DROP COLUMN api_hash")
+    conn.commit()
+    conn.execute("VACUUM")
+    conn.commit()
+    logger.info("Migrated %d api_hash value(s) out of the database into the Keychain", len(rows))
+
+
+def _restrict_db_permissions() -> None:
+    """0600, not the default 0644 -- this file holds the full index of what
+    the user has stored, plus their phone number. No other account on the
+    machine has any reason to read it."""
+    try:
+        os.chmod(config.DB_PATH, 0o600)
+    except OSError:
+        logger.warning("Could not tighten permissions on %s", config.DB_PATH)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -77,6 +172,8 @@ def get_connection() -> sqlite3.Connection:
         with _write_lock:
             _conn.executescript(SCHEMA)
             _conn.commit()
+            _migrate_api_hash_to_keychain(_conn)
+        _restrict_db_permissions()
     return _conn
 
 
@@ -198,10 +295,17 @@ def insert_album(name: str, telegram_channel_id: int) -> int:
 def wipe_local_index() -> None:
     """Clears every locally-indexed record (files, albums, membership, and
     any in-flight upload queue rows) without touching Telegram itself.
-    Used on logout -- a different (or freshly reconnected) account would
-    otherwise see stale rows pointing at channels it can't resolve.
-    Rebuilt automatically on next login by discovering the account's own
-    pre-existing BackitSnappy channels, if any."""
+    Used on an account switch -- a different account would otherwise see
+    stale rows pointing at channels it can't resolve. Rebuilt automatically
+    on next login by discovering the account's own pre-existing BackitSnappy
+    channels, if any.
+
+    Deliberately doesn't touch media_cache/thumbnails on disk -- this is a
+    pure-SQL module with no filesystem side effects by design. The caller
+    is responsible for also pruning now-orphaned cache files (see
+    media.prune_orphaned_cache, using get_all_known_hashes() before and
+    after) or they'll silently linger forever, since nothing else will
+    ever reference their now-deleted hash again."""
     conn = get_connection()
     with _write_lock:
         conn.execute("DELETE FROM upload_queue")
@@ -209,6 +313,15 @@ def wipe_local_index() -> None:
         conn.execute("DELETE FROM files")
         conn.execute("DELETE FROM albums")
         conn.commit()
+
+
+def get_all_known_hashes() -> set[str]:
+    """Every sha256_hash currently referenced by an indexed file -- used to
+    identify orphaned media_cache/thumbnail files (ones whose hash isn't in
+    this set point at content nothing local references anymore)."""
+    conn = get_connection()
+    rows = conn.execute("SELECT DISTINCT sha256_hash FROM files").fetchall()
+    return {row["sha256_hash"] for row in rows}
 
 
 def get_album(album_id: int) -> sqlite3.Row | None:
@@ -285,3 +398,120 @@ def dequeue_upload(queue_id: int) -> None:
 def get_pending_uploads() -> list[sqlite3.Row]:
     conn = get_connection()
     return conn.execute("SELECT * FROM upload_queue ORDER BY created_at").fetchall()
+
+
+# --- Photos backup audit log --------------------------------------------
+
+def insert_photos_backup_log(
+    photos_item_id: str,
+    filename: str,
+    size: int,
+    telegram_message_id: int,
+    channel_id: int,
+    uploaded_at: float,
+    deleted_at: float,
+) -> int:
+    conn = get_connection()
+    with _write_lock:
+        cur = conn.execute(
+            """INSERT INTO photos_backup_log
+               (photos_item_id, filename, size, telegram_message_id, channel_id, uploaded_at, deleted_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (photos_item_id, filename, size, telegram_message_id, channel_id, uploaded_at, deleted_at),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def get_processed_photos_item_ids() -> set[str]:
+    """Every Photos item id already backed up -- the poll loop diffs the
+    live library against this set to find what's new."""
+    conn = get_connection()
+    rows = conn.execute("SELECT photos_item_id FROM photos_backup_log").fetchall()
+    return {row["photos_item_id"] for row in rows}
+
+
+def count_photos_backup_log() -> int:
+    conn = get_connection()
+    return conn.execute("SELECT COUNT(*) AS n FROM photos_backup_log").fetchone()["n"]
+
+
+def list_photos_backup_log(limit: int = 50) -> list[sqlite3.Row]:
+    conn = get_connection()
+    return conn.execute(
+        "SELECT * FROM photos_backup_log ORDER BY uploaded_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+def get_photos_backup_last_checked() -> float | None:
+    conn = get_connection()
+    row = conn.execute("SELECT last_checked_at FROM photos_backup_state WHERE id = 1").fetchone()
+    return row["last_checked_at"] if row else None
+
+
+def set_photos_backup_last_checked(ts: float) -> None:
+    conn = get_connection()
+    with _write_lock:
+        conn.execute(
+            """INSERT INTO photos_backup_state (id, last_checked_at) VALUES (1, ?)
+               ON CONFLICT(id) DO UPDATE SET last_checked_at = excluded.last_checked_at""",
+            (ts,),
+        )
+        conn.commit()
+
+
+# --- api credentials (api_id/api_hash <-> phone binding) -----------------
+
+def get_api_credentials_for_phone(phone_key: str) -> tuple[int, str] | None:
+    """Reassembles a phone number's credentials from both halves: api_id
+    from this index, api_hash from the Keychain (see
+    secrets_store.get_api_hash_for_phone for why they're split). Returns
+    None unless both halves are present -- a row whose Keychain entry is
+    missing (deleted by the user, or a database restored onto a different
+    Mac) is unusable, and the caller should treat it as a number that
+    needs credentials entered again rather than half-build a client."""
+    from . import secrets_store  # local import: secrets_store must not import db
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT api_id FROM api_credentials WHERE phone_number = ?", (phone_key,)
+    ).fetchone()
+    if row is None:
+        return None
+    api_hash = secrets_store.get_api_hash_for_phone(phone_key)
+    if not api_hash:
+        return None
+    return row["api_id"], api_hash
+
+
+def get_phone_for_api_id(api_id: int) -> str | None:
+    """Which phone number (if any) an api_id is already bound to -- used to
+    reject reusing it for a *different* number (see
+    client_manager.set_credentials) before ever calling bind_api_credentials."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT phone_number FROM api_credentials WHERE api_id = ?", (api_id,)
+    ).fetchone()
+    return row["phone_number"] if row else None
+
+
+def bind_api_credentials(phone_key: str, api_id: int, api_hash: str) -> None:
+    """Records this phone number's credentials permanently, splitting them:
+    api_id into this index, api_hash into the Keychain. Callers MUST check
+    get_phone_for_api_id first and refuse to call this if the api_id
+    already belongs to a different phone_key -- this function itself
+    doesn't re-check, so a caller that skips that guard would silently
+    reassign the api_id's UNIQUE constraint to a new number, which is
+    exactly what the guard exists to prevent."""
+    from . import secrets_store  # local import: secrets_store must not import db
+
+    conn = get_connection()
+    with _write_lock:
+        conn.execute(
+            """INSERT INTO api_credentials (phone_number, api_id, created_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(phone_number) DO UPDATE SET api_id = excluded.api_id""",
+            (phone_key, api_id, time.time()),
+        )
+        conn.commit()
+    secrets_store.set_api_hash_for_phone(phone_key, api_hash)

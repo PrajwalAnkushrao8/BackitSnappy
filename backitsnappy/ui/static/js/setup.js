@@ -15,12 +15,25 @@ function showWizardStep(state) {
   });
 }
 
+// code/password submission can trigger a full local-index rebuild after a
+// fresh login (see client_manager._post_auth_setup) -- worth calling out
+// explicitly so a slow-but-working request doesn't look identical to a
+// hung one.
+const WIZARD_LOADING_TEXT = {
+  credentials: 'Continuing…',
+  phone: 'Sending…',
+  code: 'Verifying… this can take a minute on first login',
+  password: 'Verifying… this can take a minute on first login',
+};
+
 function wireWizardStep(stepName, inputIds, submitFn) {
   const btn = document.getElementById(`btn-submit-${stepName}`);
   const errorEl = document.getElementById(`error-${stepName}`);
+  const originalLabel = btn.textContent;
   btn.addEventListener('click', async () => {
     errorEl.textContent = '';
     btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span>${WIZARD_LOADING_TEXT[stepName] || 'Working…'}`;
     try {
       const values = inputIds.map((id) => document.getElementById(id).value.trim());
       const { state } = await submitFn(...values);
@@ -33,6 +46,7 @@ function wireWizardStep(stepName, inputIds, submitFn) {
       errorEl.textContent = e.message;
     } finally {
       btn.disabled = false;
+      btn.textContent = originalLabel;
     }
   });
 }
@@ -40,6 +54,18 @@ function wireWizardStep(stepName, inputIds, submitFn) {
 function initSetupWizard() {
   document.getElementById('btn-open-telegram-api').addEventListener('click', () => {
     window.pywebview.api.open_telegram_api_page();
+  });
+
+  // Purely client-side navigation -- the credentials step only shows up
+  // after submitting a phone number that turned out to have no api_id/
+  // api_hash bound yet (see client_manager.send_code), and nothing on the
+  // backend has been created for it at that point (no client, no code
+  // request), so there's nothing to undo server-side. Re-submitting a
+  // (possibly different) phone number from here works exactly the same
+  // as submitting it the first time.
+  document.getElementById('btn-back-credentials').addEventListener('click', () => {
+    document.getElementById('error-credentials').textContent = '';
+    showWizardStep('needs_phone');
   });
 
   wireWizardStep('credentials', ['input-api-id', 'input-api-hash'], (apiId, apiHash) =>
