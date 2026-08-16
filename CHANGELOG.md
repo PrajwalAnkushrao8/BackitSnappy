@@ -1,34 +1,11 @@
 # Changelog
 
-## v0.2.2
-
-### Added
-
-- **Photos are now backed up and removed on separate schedules.** Everything
-  uploads as soon as it's found, but an item is only removed from the Photos
-  library once it's older than a configurable window (default 30 days).
-
-  This exists because iCloud Photos is a sync service, not a backup one: there
-  is one library mirrored across devices, so deleting on the Mac also deletes
-  from the iPhone, and Apple exposes no way to drop a photo from iCloud while
-  keeping it on the phone. Delaying removal is the only way to have recent
-  photos stay on your phone while still reclaiming space from the long tail.
-
-- **"Remove backed-up photos now"** in Settings — deletes everything already
-  confirmed in Telegram, ignoring the age window, for reclaiming space on
-  demand.
-
-### Changed
-
-- Each poll cycle now re-examines the whole backlog of backed-up-but-not-removed
-  items rather than only that cycle's uploads, so a photo is cleared out on the
-  cycle it ages past the window, with no extra scheduling.
-
 ## v0.2.1
 
-Fixes the two Automatic Photos Backup problems v0.2.0 shipped with: photos
+Fixes the two Automatic Photos Backup problems v0.2.0 shipped with — photos
 were never actually removed from the library, and the "backed up so far"
-counter sat at zero even while uploads were succeeding.
+counter sat at zero even while uploads were succeeding — and changes *when*
+removal happens so it stops emptying your iPhone's camera roll along with it.
 
 ### Fixed
 
@@ -53,17 +30,35 @@ counter sat at zero even while uploads were succeeding.
   "new" to the next poll cycle. Rows are now written the moment an upload is
   confirmed, with the deletion timestamp filled in separately afterward.
 
-### Changed
-
-- **Deletion is batched per poll cycle, and macOS will ask you to confirm.**
-  PhotoKit shows a confirmation dialog for every change request and an
-  unbundled app cannot suppress it, so a cycle's items are deleted in a single
-  request — one dialog per cycle instead of one per photo. Declining it leaves
-  everything in the library, still backed up and still counted.
-
 ### Added
 
+- **Photos are now backed up and removed on separate schedules.** Everything
+  uploads as soon as it's found, but an item is only removed from the Photos
+  library once it's older than a configurable window (default 30 days).
+
+  This exists because iCloud Photos is a sync service, not a backup one: there
+  is one library mirrored across devices, so deleting on the Mac also deletes
+  from the iPhone, and Apple exposes no way to drop a photo from iCloud while
+  keeping it on the phone. Delaying removal is the only way to have recent
+  photos stay on your phone while still reclaiming space from the long tail.
+
+- **"Remove backed-up photos now"** in Settings — deletes everything already
+  confirmed in Telegram, ignoring the age window, for reclaiming space on
+  demand.
+
 - `pyobjc-framework-Photos` dependency, required for the PhotoKit deletion path.
+
+### Changed
+
+- **Deletion is batched, and macOS will ask you to confirm.** PhotoKit shows a
+  confirmation dialog for every change request and an unbundled app cannot
+  suppress it, so a cycle's eligible items are deleted in a single request —
+  one dialog per cycle instead of one per photo. Declining it leaves everything
+  in the library, still backed up and still counted.
+- Each poll cycle now re-examines the whole backlog of backed-up-but-not-removed
+  items rather than only that cycle's uploads, and runs even when nothing new
+  was found — so a photo is cleared out on the cycle it ages past the window,
+  with no extra scheduling.
 
 ## v0.2.0
 

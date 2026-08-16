@@ -25,7 +25,7 @@ DEFAULTS = {
     # Photos is a sync service, not a backup one -- deleting on this Mac
     # deletes from iPhone too -- so recent photos are left in place to stay
     # on the phone, and only the long tail is cleared out to reclaim
-    # storage. 0 means "delete as soon as it's backed up" (the pre-0.2.2
+    # storage. 0 means "delete as soon as it's backed up" (the pre-0.2.1
     # behaviour); the Settings UI clamps to a sane range.
     "photos_backup_delete_after_days": 30,
     "last_authorized_user_id": None,
