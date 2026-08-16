@@ -42,9 +42,9 @@ See it in more detail on the [landing page](https://prajwalankushrao8.github.io/
 - **Videos stream instantly.** Click a video and it plays immediately, pulled
   from Telegram in chunks as you watch — no waiting for a multi-gigabyte
   download first, and nothing permanently written to your disk.
-- **Automatic Photos backup.** Point it at your macOS Photos library and it
-  uploads new items on a schedule, then (optionally) removes them from Photos to
-  free up iCloud space.
+- **Automatic Photos backup.** Uploads new items from your macOS Photos library
+  on a schedule, and clears out ones older than 30 days to reclaim iCloud space
+  — so recent photos stay on your iPhone while the long tail lives in Telegram.
 - **Auto-backup folder.** Anything dropped into a watched folder is uploaded
   automatically, including from other apps and scripts.
 - **A bounded local footprint.** Your library can be far larger than your Mac's
@@ -94,12 +94,27 @@ streaming from Telegram rather than downloading first.
 ![Settings](images/settings.jpg)
 
 In **Settings → Automatic Photos Backup**, turn it on and BackitSnappy will poll
-your macOS Photos library on a schedule (default: every 10 minutes), upload
-anything new, and — only after the upload is confirmed — delete it from Photos.
+your macOS Photos library on a schedule (default: every 10 minutes) and upload
+**everything** new to Telegram.
 
-Deleted items go to Photos' own **Recently Deleted**, Apple's 30-day safety
-window, so nothing is ever destroyed immediately. iCloud storage frees up after
-that window, or right away if you empty Recently Deleted yourself.
+Removing photos from your library is a **separate, delayed step** — and that
+separation is the point. iCloud Photos is a sync service, not a backup one:
+there's one library mirrored across your devices, so anything deleted on your
+Mac also disappears from your iPhone. Apple provides no way to remove a photo
+from iCloud while keeping it on the phone.
+
+So backup and cleanup are decoupled:
+
+- **Everything is backed up immediately**, the moment it appears.
+- **Only photos older than 30 days are removed** from the library (configurable,
+  including 0 for "remove as soon as it's backed up"). Recent shots stay on your
+  iPhone where you want them; the long tail gets cleared out to reclaim iCloud
+  space.
+- **"Remove backed-up photos now"** in Settings clears everything that's been
+  backed up, ignoring the age window, whenever you want the space back sooner.
+
+Removed items go to Photos' own **Recently Deleted**, Apple's 30-day undo
+window, so nothing is ever destroyed immediately.
 
 This is **off by default** and requires macOS Automation permission for
 Photos.app, which the system will prompt for the first time it runs.

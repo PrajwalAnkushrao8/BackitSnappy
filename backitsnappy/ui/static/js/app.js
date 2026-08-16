@@ -501,6 +501,11 @@ function initSettingsView() {
   const savePollIntervalBtn = document.getElementById('btn-save-poll-interval');
   const photosLastChecked = document.getElementById('photos-last-checked');
   const photosBackedUpCount = document.getElementById('photos-backed-up-count');
+  const deleteAfterDaysInput = document.getElementById('input-delete-after-days');
+  const saveDeleteAfterDaysBtn = document.getElementById('btn-save-delete-after-days');
+  const photosPendingCount = document.getElementById('photos-pending-count');
+  const photosDeleteNowBtn = document.getElementById('btn-photos-delete-now');
+  const photosDeleteNowResult = document.getElementById('photos-delete-now-result');
   const photosBackupToggle = document.getElementById('toggle-photos-backup');
   const photosBackupLogList = document.getElementById('photos-backup-log-list');
   const diskUsageTotal = document.getElementById('disk-usage-total');
@@ -569,6 +574,9 @@ function initSettingsView() {
     photosLastChecked.textContent = settings.last_checked_at
       ? new Date(settings.last_checked_at * 1000).toLocaleString() : 'never';
     photosBackedUpCount.textContent = String(settings.backed_up_count);
+    deleteAfterDaysInput.value = settings.delete_after_days;
+    photosPendingCount.textContent = String(settings.pending_deletion_count);
+    photosDeleteNowBtn.disabled = settings.pending_deletion_count === 0;
     photosBackupToggle.classList.toggle('on', !!settings.enabled);
     return settings;
   }
@@ -649,14 +657,47 @@ function initSettingsView() {
     }
   });
 
+  saveDeleteAfterDaysBtn.addEventListener('click', async () => {
+    const days = parseInt(deleteAfterDaysInput.value, 10);
+    try {
+      await API.request('/api/photos_backup/delete_after_days', { method: 'PUT', json: { days } });
+      await refreshPhotosBackupSettings();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+
+  photosDeleteNowBtn.addEventListener('click', async () => {
+    const pending = photosPendingCount.textContent;
+    if (!confirm(
+      `Remove ${pending} backed-up photo(s) from your Photos library now?\n\n`
+      + 'They are already in Telegram, and will go to Recently Deleted (Apple\u2019s 30-day undo '
+      + 'window) first. Because iCloud Photos syncs, this also removes them from your iPhone.\n\n'
+      + 'macOS will ask you to confirm as well.'
+    )) return;
+    photosDeleteNowBtn.disabled = true;
+    photosDeleteNowResult.textContent = 'Waiting for macOS to confirm\u2026';
+    try {
+      const { deleted } = await API.request('/api/photos_backup/delete_now', { method: 'POST' });
+      photosDeleteNowResult.textContent = deleted
+        ? `Removed ${deleted} photo(s). They're in Recently Deleted if you need them back.`
+        : 'Nothing was removed.';
+      await refreshPhotosBackupSettings();
+    } catch (e) {
+      photosDeleteNowResult.textContent = e.message;
+    } finally {
+      photosDeleteNowBtn.disabled = false;
+    }
+  });
+
   photosBackupToggle.addEventListener('click', async () => {
     const enabling = !photosBackupToggle.classList.contains('on');
     if (enabling) {
       const confirmed = confirm(
-        'Automatic Photos Backup will upload new photos to Telegram, and once a backup is '
-        + 'confirmed, delete them from your Photos library. Deleted photos go to Recently Deleted '
-        + '(Apple’s 30-day safety window) — iCloud storage frees automatically after that, '
-        + 'or immediately if you empty Recently Deleted yourself. Are you sure?'
+        'Automatic Photos Backup will upload every new photo to Telegram. Photos are only '
+        + 'removed from your library once they pass the age you set below, and removal goes to '
+        + 'Recently Deleted (Apple’s 30-day undo window) first. Because iCloud Photos syncs, '
+        + 'anything removed here also disappears from your iPhone. Are you sure?'
       );
       if (!confirmed) return;
     }

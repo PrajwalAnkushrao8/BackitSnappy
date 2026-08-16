@@ -127,14 +127,24 @@ backed up on its own.
 ## 7. Turn on Automatic Photos Backup (optional)
 
 This is the feature that actually frees up space: BackitSnappy watches your
-macOS Photos library, uploads anything new to Telegram, and then removes it
-from Photos.
+macOS Photos library, uploads anything new to Telegram, and later clears the
+older items out of your library.
+
+**Backup and removal are on separate schedules, on purpose.** iCloud Photos is
+a sync service — one library mirrored across your devices — so a photo deleted
+on your Mac also vanishes from your iPhone, and Apple offers no way to remove
+something from iCloud while keeping it on the phone. So everything is backed up
+straight away, but only photos past a certain age are removed, leaving recent
+shots where you expect them.
 
 1. Open **Settings → Automatic Photos Backup**.
 2. Set **"Check for new photos every"** to whatever interval suits you
    (default 10 minutes, minimum 5).
-3. Flip **"Enable Automatic Photos Backup"** on.
-4. macOS will ask for **Automation permission** for Photos.app the first time
+3. Set **"Remove from Photos once they're older than"** — 30 days by default.
+   This only gates removal; backup is never delayed by it. Set 0 to remove as
+   soon as a backup is confirmed.
+4. Flip **"Enable Automatic Photos Backup"** on.
+5. macOS will ask for **Automation permission** for Photos.app the first time
    it runs. You must allow this — the feature can't read your library
    otherwise. If you dismissed the prompt, re-enable it under **System
    Settings → Privacy & Security → Automation → BackitSnappy → Photos**;
@@ -154,6 +164,10 @@ from Photos unless it's verifiably in Telegram first.
 > request, so you get **one dialog per cycle** rather than one per photo. If
 > you're away from the machine, the cycle simply waits; declining leaves
 > everything in your library, already safely backed up.
+
+Need the space sooner than the age window allows? **Settings → Free Up iCloud
+Storage → "Remove backed-up photos now"** clears everything already confirmed in
+Telegram, regardless of age.
 
 Turning the toggle off stops the whole loop immediately. It's off by default,
 and it's the only feature in the app that deletes anything from Photos.

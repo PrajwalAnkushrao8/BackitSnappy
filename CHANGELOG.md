@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.2
+
+### Added
+
+- **Photos are now backed up and removed on separate schedules.** Everything
+  uploads as soon as it's found, but an item is only removed from the Photos
+  library once it's older than a configurable window (default 30 days).
+
+  This exists because iCloud Photos is a sync service, not a backup one: there
+  is one library mirrored across devices, so deleting on the Mac also deletes
+  from the iPhone, and Apple exposes no way to drop a photo from iCloud while
+  keeping it on the phone. Delaying removal is the only way to have recent
+  photos stay on your phone while still reclaiming space from the long tail.
+
+- **"Remove backed-up photos now"** in Settings — deletes everything already
+  confirmed in Telegram, ignoring the age window, for reclaiming space on
+  demand.
+
+### Changed
+
+- Each poll cycle now re-examines the whole backlog of backed-up-but-not-removed
+  items rather than only that cycle's uploads, so a photo is cleared out on the
+  cycle it ages past the window, with no extra scheduling.
+
 ## v0.2.1
 
 Fixes the two Automatic Photos Backup problems v0.2.0 shipped with: photos

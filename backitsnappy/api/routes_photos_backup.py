@@ -22,14 +22,42 @@ class EnableIn(BaseModel):
     enabled: bool
 
 
+class DeleteAfterDaysIn(BaseModel):
+    days: int
+
+
 @router.get("/settings")
 async def get_photos_backup_settings():
     return {
         "enabled": config.get("photos_backup_enabled"),
         "poll_interval_minutes": config.get("photos_backup_poll_interval_minutes"),
+        "delete_after_days": config.get("photos_backup_delete_after_days"),
         "last_checked_at": db.get_photos_backup_last_checked(),
         "backed_up_count": db.count_photos_backup_log(),
+        # Backed up and still sitting in the Photos library -- what the
+        # manual "free up space now" action below would clear.
+        "pending_deletion_count": db.count_photos_backup_pending_deletion(),
     }
+
+
+@router.put("/delete_after_days")
+async def set_delete_after_days(body: DeleteAfterDaysIn):
+    """How old an item must be before it's removed from the Photos library.
+    Backup itself is never delayed by this -- everything uploads as soon as
+    it's found; this only gates the delete."""
+    if not (0 <= body.days <= 3650):
+        raise HTTPException(status_code=400, detail="Delete delay must be between 0 and 3650 days")
+    config.set("photos_backup_delete_after_days", body.days)
+    return {"delete_after_days": body.days}
+
+
+@router.post("/delete_now")
+async def delete_now():
+    """Manual "free up iCloud storage now": deletes every backed-up item
+    still in the Photos library, ignoring the age window. macOS will show
+    its own confirmation dialog before anything is removed."""
+    deleted = await photos_backup.delete_all_backed_up_now()
+    return {"deleted": deleted}
 
 
 @router.put("/poll_interval")

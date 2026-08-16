@@ -132,8 +132,15 @@ your iCloud storage frees up without anything being destroyed outright.
 - **Automation permission** shows whether macOS has granted access to
   Photos.app, with a button that opens the right System Settings page.
 - **Check for new photos every** sets the interval (5–120 minutes).
+- **Remove from Photos once they're older than** sets the age window. Backup is
+  never delayed by this — it only gates removal, so recent photos stay on your
+  iPhone. 0 removes as soon as a backup is confirmed.
 - **Enable Automatic Photos Backup** is the master switch. Off by default.
 - **Recent Photos Backups** below lists what's been backed up so far.
+
+Under **Free Up iCloud Storage**, "Remove backed-up photos now" clears
+everything already in Telegram regardless of age, for when you want the space
+back sooner than the window allows.
 
 The upload is confirmed before anything is deleted — an item never leaves your
 library unless it's verifiably in Telegram first. macOS shows one confirmation

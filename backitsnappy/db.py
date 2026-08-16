@@ -497,6 +497,16 @@ def count_photos_backup_log() -> int:
     return conn.execute("SELECT COUNT(*) AS n FROM photos_backup_log").fetchone()["n"]
 
 
+def count_photos_backup_pending_deletion() -> int:
+    """Distinct Photos items backed up but not yet removed from the
+    library -- counted by item, not by row, since one item can be several
+    rows (a Live Photo is a still plus its .mov)."""
+    conn = get_connection()
+    return conn.execute(
+        "SELECT COUNT(DISTINCT photos_item_id) AS n FROM photos_backup_log WHERE deleted_at IS NULL"
+    ).fetchone()["n"]
+
+
 def list_photos_backup_log(limit: int = 50) -> list[sqlite3.Row]:
     conn = get_connection()
     return conn.execute(

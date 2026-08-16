@@ -178,6 +178,36 @@ def photokit_authorization_status() -> str:
     }.get(status, f"unknown({status})")
 
 
+def _creation_dates_blocking(item_ids: list[str]) -> dict[str, float]:
+    import Photos
+
+    fetched = Photos.PHAsset.fetchAssetsWithLocalIdentifiers_options_(list(item_ids), None)
+    dates: dict[str, float] = {}
+    if fetched is None:
+        return dates
+    for i in range(fetched.count()):
+        asset = fetched.objectAtIndex_(i)
+        created = asset.creationDate()
+        if created is not None:
+            # NSDate -> POSIX seconds, matching everything else in this app.
+            dates[asset.localIdentifier()] = created.timeIntervalSince1970()
+    return dates
+
+
+async def get_creation_dates(item_ids: list[str]) -> dict[str, float]:
+    """{item_id: unix timestamp} for whichever ids still resolve to a real
+    asset. Read via PhotoKit rather than the scripting interface because
+    the delete path already fetches these same assets, and because an
+    id that no longer resolves (deleted by hand in the meantime) should
+    simply drop out of the result rather than raise.
+
+    Used to decide *when* an already-backed-up item becomes eligible for
+    deletion -- see photos_backup.eligible_for_deletion."""
+    if not item_ids:
+        return {}
+    return await asyncio.to_thread(_creation_dates_blocking, item_ids)
+
+
 def _delete_assets_blocking(item_ids: list[str]) -> int:
     """Synchronous PhotoKit deletion -- see delete_items for why this is
     batched and what the caller must know about the confirmation prompt."""

@@ -20,6 +20,14 @@ DEFAULTS = {
     "photos_backup_enabled": False,
     "photos_backup_poll_interval_minutes": 10,
     "photos_backup_album_id": None,
+    # Everything gets *backed up* as soon as it appears, but an item is only
+    # *deleted* from the Photos library once it's at least this old. iCloud
+    # Photos is a sync service, not a backup one -- deleting on this Mac
+    # deletes from iPhone too -- so recent photos are left in place to stay
+    # on the phone, and only the long tail is cleared out to reclaim
+    # storage. 0 means "delete as soon as it's backed up" (the pre-0.2.2
+    # behaviour); the Settings UI clamps to a sane range.
+    "photos_backup_delete_after_days": 30,
     "last_authorized_user_id": None,
     # Digits-only phone key (see client_manager._phone_key) of whoever is
     # currently/last signed in -- looked up against db's api_credentials

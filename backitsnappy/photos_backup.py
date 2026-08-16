@@ -150,41 +150,107 @@ async def poll_cycle(manager: TelegramManager) -> None:
         (item_id, filename) for item_id, filename in items
         if item_id not in known and item_id not in _in_flight
     ]
-    if not new_items:
-        return
-    logger.info("Photos backup: found %d new item(s)", len(new_items))
-    album_id = await manager.ensure_photos_backup_album()
-    _status.update(active=True, total=len(new_items), done=0)
-    try:
-        results = await asyncio.gather(
-            *(_process_item(manager, album_id, item_id, filename) for item_id, filename in new_items)
-        )
-    finally:
-        _status["active"] = False
+    if new_items:
+        logger.info("Photos backup: found %d new item(s)", len(new_items))
+        album_id = await manager.ensure_photos_backup_album()
+        _status.update(active=True, total=len(new_items), done=0)
+        try:
+            await asyncio.gather(
+                *(_process_item(manager, album_id, item_id, filename) for item_id, filename in new_items)
+            )
+        finally:
+            _status["active"] = False
 
-    # One batched delete for everything that uploaded successfully, rather
-    # than one call per item: macOS shows a confirmation prompt per PhotoKit
-    # change request, so batching turns N prompts into one (see
-    # photos_automation.delete_items). Items whose upload failed are simply
-    # absent from this list and stay in the library.
-    deletable = [item_id for item_id in results if item_id]
-    if not deletable:
-        return
+    # Runs every cycle, including cycles that found nothing new to upload.
+    # It sweeps *everything* still pending deletion, not just this cycle's
+    # uploads: an item backed up today only becomes deletable once it's
+    # older than the configured window, so the whole backlog has to be
+    # re-examined each time. That's also what lets a photo backed up weeks
+    # ago get cleared out on the cycle it finally ages past the threshold,
+    # with no separate scheduling to maintain.
+    await sweep_deletions()
+
+
+async def pending_deletion_ids() -> list[str]:
+    """Items confirmed backed up to Telegram that are still in the Photos
+    library. These are safe to delete at any time -- the age window is a
+    user preference about *when* to reclaim the space, not a safety
+    property."""
+    rows = db.get_connection().execute(
+        "SELECT DISTINCT photos_item_id FROM photos_backup_log WHERE deleted_at IS NULL"
+    ).fetchall()
+    return [row["photos_item_id"] for row in rows]
+
+
+async def eligible_for_deletion(item_ids: list[str]) -> list[str]:
+    """Filters pending items down to those older than the configured
+    window. Items whose id no longer resolves to a real asset are dropped
+    too -- they've already left the library by some other route, so
+    there's nothing to delete."""
+    if not item_ids:
+        return []
+    days = config.get("photos_backup_delete_after_days")
+    dates = await photos_automation.get_creation_dates(item_ids)
+    if days <= 0:
+        return [i for i in item_ids if i in dates]
+    cutoff = time.time() - days * 86400
+    return [i for i in item_ids if i in dates and dates[i] <= cutoff]
+
+
+async def _delete_and_mark(item_ids: list[str], reason: str) -> int:
+    """Shared tail of both the scheduled sweep and the manual "free up
+    space now" action: one batched PhotoKit delete, then record the
+    timestamp for whatever actually went."""
+    if not item_ids:
+        return 0
     try:
-        deleted_count = await photos_automation.delete_items(deletable)
+        deleted_count = await photos_automation.delete_items(item_ids)
     except photos_automation.PhotosAutomationError:
         logger.exception(
-            "Photos backup: %d item(s) are uploaded but couldn't be deleted from Photos",
-            len(deletable),
+            "Photos backup: %d item(s) are uploaded but couldn't be deleted from Photos (%s)",
+            len(item_ids), reason,
         )
-        return
-    now = time.time()
-    for item_id in deletable:
-        db.mark_photos_backup_deleted(item_id, now)
+        return 0
+    if deleted_count:
+        now = time.time()
+        for item_id in item_ids:
+            db.mark_photos_backup_deleted(item_id, now)
     logger.info(
-        "Photos backup: deleted %d of %d backed-up item(s) from Photos",
-        deleted_count, len(deletable),
+        "Photos backup: deleted %d of %d backed-up item(s) from Photos (%s)",
+        deleted_count, len(item_ids), reason,
     )
+    return deleted_count
+
+
+async def sweep_deletions() -> int:
+    """Deletes every backed-up item that has aged past the configured
+    window. Called at the end of each poll cycle."""
+    pending = await pending_deletion_ids()
+    eligible = await eligible_for_deletion(pending)
+    if not eligible:
+        if pending:
+            logger.info(
+                "Photos backup: %d item(s) backed up, none older than the %d-day delete window yet",
+                len(pending), config.get("photos_backup_delete_after_days"),
+            )
+        return 0
+    return await _delete_and_mark(eligible, "aged past the delete window")
+
+
+async def delete_all_backed_up_now() -> int:
+    """Manual "free up iCloud storage now" -- deletes every backed-up item
+    still in the library, ignoring the age window entirely. Only ever
+    triggered explicitly by the user from Settings; the age window exists
+    to keep recent photos on their phone, and choosing this is choosing to
+    override that for the sake of space."""
+    pending = await pending_deletion_ids()
+    if not pending:
+        return 0
+    # Still resolve through PhotoKit first so ids that already left the
+    # library by some other route don't count toward the result.
+    dates = await photos_automation.get_creation_dates(pending)
+    present = [i for i in pending if i in dates]
+    return await _delete_and_mark(present, "manual free-up-space request")
 
 
 async def poll_loop(manager: TelegramManager, stop_event: asyncio.Event) -> None:

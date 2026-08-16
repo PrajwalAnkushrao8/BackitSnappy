@@ -186,10 +186,10 @@
         <div class="section-header">Automatic Photos Backup</div>
         <div class="card" style="padding: 16px;">
           <div class="list-row-subtitle" style="margin-bottom: 12px;">
-            No iPhone setup needed. BackitSnappy polls Photos.app directly, uploads new items to
-            Telegram, and once confirmed, deletes them from Photos &mdash; which moves them to
-            <strong>Recently Deleted</strong>, Apple's own 30-day safety window. iCloud storage frees
-            automatically after that period, or immediately if you empty Recently Deleted yourself.
+            No iPhone setup needed. BackitSnappy polls Photos.app directly and uploads
+            <strong>every</strong> new item to Telegram. Removing them from your library is separate
+            and delayed &mdash; see below &mdash; because iCloud Photos is a sync service, so
+            anything deleted here also disappears from your iPhone.
           </div>
 
           <div class="list-row" style="border:none; padding: 8px 0;">
@@ -212,6 +212,18 @@
             <button class="btn btn-secondary" id="btn-save-poll-interval">Save</button>
           </div>
 
+          <div class="list-row-title" style="margin: 12px 0 4px;">Remove from Photos once they're older than</div>
+          <div class="list-row-subtitle" style="margin-bottom: 8px;">
+            Backup always happens immediately. This only controls when a backed-up photo is cleared
+            out of your library to reclaim iCloud space &mdash; so recent shots stay on your iPhone.
+            Set to 0 to remove as soon as a backup is confirmed.
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:16px;">
+            <input type="number" id="input-delete-after-days" min="0" max="3650" style="width:70px; min-height:36px; border-radius:8px; border:1px solid var(--separator); padding: 0 10px; background: var(--bg-secondary); color: var(--label-primary);" />
+            <span class="list-row-subtitle">days</span>
+            <button class="btn btn-secondary" id="btn-save-delete-after-days">Save</button>
+          </div>
+
           <div class="list-row-subtitle" style="margin-bottom: 16px;">
             Last checked: <span id="photos-last-checked">never</span> &middot;
             Backed up so far: <span id="photos-backed-up-count">0</span>
@@ -220,10 +232,26 @@
           <div class="list-row" style="border:none; padding: 8px 0; display:flex; align-items:center; justify-content: space-between;">
             <div>
               <div class="list-row-title">Enable Automatic Photos Backup</div>
-              <div class="list-row-subtitle">Off by default. Deletes photos from your library after a verified backup.</div>
+              <div class="list-row-subtitle">Off by default. Uploads everything; removes only what's past the age above.</div>
             </div>
             <div class="toggle-track" id="toggle-photos-backup"><div class="toggle-thumb"></div></div>
           </div>
+        </div>
+
+        <div class="section-header">Free Up iCloud Storage</div>
+        <div class="card" style="padding: 16px;">
+          <div class="list-row-subtitle" style="margin-bottom: 12px;">
+            <span id="photos-pending-count">0</span> backed-up photo(s) are still in your Photos
+            library. Removing them now reclaims iCloud storage immediately, ignoring the age setting
+            above &mdash; they're already safely in Telegram. They'll go to
+            <strong>Recently Deleted</strong> first, Apple's 30-day undo window, and macOS will ask
+            you to confirm.
+          </div>
+          <div class="list-row-subtitle" style="margin-bottom: 12px;">
+            Because iCloud Photos syncs, this also removes them from your iPhone.
+          </div>
+          <button class="btn btn-secondary" id="btn-photos-delete-now">Remove backed-up photos now</button>
+          <div class="list-row-subtitle" id="photos-delete-now-result" style="margin-top: 8px;"></div>
         </div>
 
         <div class="section-header">Recent Photos Backups</div>
