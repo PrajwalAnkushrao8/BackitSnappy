@@ -507,13 +507,6 @@ def count_photos_backup_pending_deletion() -> int:
     ).fetchone()["n"]
 
 
-def list_photos_backup_log(limit: int = 50) -> list[sqlite3.Row]:
-    conn = get_connection()
-    return conn.execute(
-        "SELECT * FROM photos_backup_log ORDER BY uploaded_at DESC LIMIT ?", (limit,)
-    ).fetchall()
-
-
 def get_photos_backup_last_checked() -> float | None:
     conn = get_connection()
     row = conn.execute("SELECT last_checked_at FROM photos_backup_state WHERE id = 1").fetchone()

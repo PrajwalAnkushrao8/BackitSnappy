@@ -636,6 +636,11 @@ html, body {
 .breadcrumb-link:hover { text-decoration: underline; }
 .breadcrumb-sep { color: var(--label-tertiary); }
 
+/* Generic inline text link (Settings -> "View backed-up photos", etc.) --
+   same look as a breadcrumb link, used outside the breadcrumb itself. */
+.text-link { color: var(--system-blue); cursor: pointer; text-decoration: none; }
+.text-link:hover { text-decoration: underline; }
+
 /* --- Finder-style folder grid (Albums top level) --- */
 .finder-grid {
   display: grid;

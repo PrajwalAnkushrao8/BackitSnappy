@@ -507,7 +507,8 @@ function initSettingsView() {
   const photosDeleteNowBtn = document.getElementById('btn-photos-delete-now');
   const photosDeleteNowResult = document.getElementById('photos-delete-now-result');
   const photosBackupToggle = document.getElementById('toggle-photos-backup');
-  const photosBackupLogList = document.getElementById('photos-backup-log-list');
+  const viewPhotosAlbumLink = document.getElementById('link-view-photos-backup-album');
+  let photosBackupAlbumId = null;
   const diskUsageTotal = document.getElementById('disk-usage-total');
   const diskUsageBreakdown = document.getElementById('disk-usage-breakdown');
   const refreshDiskUsageBtn = document.getElementById('btn-refresh-disk-usage');
@@ -546,28 +547,6 @@ function initSettingsView() {
     }
   });
 
-  function renderPhotosBackupLog(rows) {
-    if (!rows.length) {
-      photosBackupLogList.innerHTML = 'No photos backed up yet.';
-      return;
-    }
-    photosBackupLogList.innerHTML = rows.map((row) => {
-      const when = new Date(row.uploaded_at * 1000).toLocaleString();
-      return `
-        <div class="list-row">
-          <div style="flex:1; min-width:0;">
-            <div class="list-row-title">${escapeHTML(row.filename)}</div>
-            <div class="list-row-subtitle">${when} &middot; Telegram message #${row.telegram_message_id}</div>
-          </div>
-        </div>`;
-    }).join('');
-  }
-
-  async function refreshPhotosBackupLog() {
-    const rows = await API.request('/api/photos_backup/log');
-    renderPhotosBackupLog(rows);
-  }
-
   async function refreshPhotosBackupSettings() {
     const settings = await API.request('/api/photos_backup/settings');
     pollIntervalInput.value = settings.poll_interval_minutes;
@@ -578,13 +557,17 @@ function initSettingsView() {
     photosPendingCount.textContent = String(settings.pending_deletion_count);
     photosDeleteNowBtn.disabled = settings.pending_deletion_count === 0;
     photosBackupToggle.classList.toggle('on', !!settings.enabled);
+    photosBackupAlbumId = settings.album_id;
+    // No album exists until the first item is ever backed up (see
+    // routes_photos_backup.get_photos_backup_settings) -- nothing to link to yet.
+    viewPhotosAlbumLink.classList.toggle('hidden', !photosBackupAlbumId);
     return settings;
   }
 
   // Live "is a poll cycle actively running right now" indicator -- polled
   // continuously (not just while Settings happens to be open) so the count
-  // and log refresh themselves the moment a cycle finishes, without the
-  // user needing to reload anything.
+  // refreshes itself the moment a cycle finishes, without the user needing
+  // to reload anything.
   let wasBackingUp = false;
   async function pollBackupStatus() {
     try {
@@ -593,7 +576,7 @@ function initSettingsView() {
         ? `Backing up now… (${status.done} of ${status.total})`
         : 'Idle';
       if (wasBackingUp && !status.active) {
-        await Promise.all([refreshPhotosBackupSettings(), refreshPhotosBackupLog()]);
+        await refreshPhotosBackupSettings();
       }
       wasBackingUp = status.active;
     } catch (e) {
@@ -642,8 +625,6 @@ function initSettingsView() {
       openAutomationSettingsBtn.classList.add('hidden');
     }
   });
-  refreshPhotosBackupLog();
-
   openAutomationSettingsBtn.addEventListener('click', () => {
     window.pywebview.api.open_automation_settings();
   });
@@ -654,6 +635,23 @@ function initSettingsView() {
       await API.request('/api/photos_backup/poll_interval', { method: 'PUT', json: { minutes } });
     } catch (e) {
       alert(e.message);
+    }
+  });
+
+  // Backed-up photos are browsable with real thumbnails in their own
+  // auto-created album -- rather than a second, worse (text-only) view of
+  // the same rows here in Settings, this just jumps straight to it.
+  viewPhotosAlbumLink.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!photosBackupAlbumId) return;
+    try {
+      const albums = await API.request('/api/albums');
+      const album = albums.find((a) => a.id === photosBackupAlbumId);
+      if (!album) return;
+      document.querySelector('.nav-item[data-view="albums"]').click();
+      openAlbum(album);
+    } catch (err) {
+      alert(err.message);
     }
   });
 

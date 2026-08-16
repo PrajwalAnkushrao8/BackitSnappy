@@ -1,11 +1,15 @@
-"""Automatic Photos Backup settings, permission status, and audit log.
+"""Automatic Photos Backup settings and permission status.
 
 Enabling is a separate, explicit action from anything else -- the
 confirmation dialog itself lives in the frontend (same pattern as the
 feature this replaced). This router never calls AppleScript itself except
 for the read-only permission probe -- the actual poll/export/upload/delete
 pipeline lives in photos_backup.py's background loop.
-"""
+
+No audit-log listing route here -- backed-up items are already browsable
+with real thumbnails in the auto-created "Photos Backup" album under
+Albums, so a second, text-only view of the same rows in Settings was pure
+duplication. See routes_albums.py / routes_files.py for that."""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -32,6 +36,11 @@ async def get_photos_backup_settings():
         "enabled": config.get("photos_backup_enabled"),
         "poll_interval_minutes": config.get("photos_backup_poll_interval_minutes"),
         "delete_after_days": config.get("photos_backup_delete_after_days"),
+        # None until the first item is ever backed up -- ensure_photos_backup_album
+        # (client_manager.py) only creates the album lazily, on first use. The
+        # Settings UI uses this to link straight into Albums instead of
+        # duplicating a browsable view of the same content itself.
+        "album_id": config.get("photos_backup_album_id"),
         "last_checked_at": db.get_photos_backup_last_checked(),
         "backed_up_count": db.count_photos_backup_log(),
         # Backed up and still sitting in the Photos library -- what the
@@ -85,9 +94,3 @@ async def get_status():
 async def get_permission_status():
     status = await photos_automation.check_permission()
     return {"status": status}
-
-
-@router.get("/log")
-async def get_photos_backup_log(limit: int = 50):
-    rows = db.list_photos_backup_log(limit=limit)
-    return [dict(row) for row in rows]
