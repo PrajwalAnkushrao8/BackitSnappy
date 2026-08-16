@@ -1278,9 +1278,23 @@ class TelegramManager:
             cached = await self.ensure_local_media(file_row, job_id=job_id)
 
             if destination_type == "custom":
+                # An exact file path chosen via the single-file Save As
+                # panel -- the filename itself is already user-confirmed,
+                # so no collision-suffixing here.
                 if not destination_path:
                     raise ValueError("No destination path given")
                 dest = _validated_save_path(destination_path)
+            elif destination_type == "folder":
+                # A directory chosen once (via the native folder picker) and
+                # reused for every file in a multi-select download -- same
+                # Finder-style collision handling as the default path below,
+                # just rooted at the user's chosen folder instead of
+                # ~/Downloads/BackitSnappy.
+                if not destination_path:
+                    raise ValueError("No destination folder given")
+                folder = _validated_save_path(destination_path)
+                folder.mkdir(parents=True, exist_ok=True)
+                dest = _unique_path(folder / media.safe_filename(file_row["filename"]))
             else:
                 downloads_dir = Path.home() / "Downloads" / "BackitSnappy"
                 downloads_dir.mkdir(parents=True, exist_ok=True)

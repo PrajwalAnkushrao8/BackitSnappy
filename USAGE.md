@@ -92,7 +92,9 @@ The **Select** button appears in an album's toolbar (only when the album
 actually has content — an empty album won't show it). Turn it on to:
 
 - **Select All** the currently-visible files.
-- **Download** everything selected at once.
+- **Download** everything selected at once — asks where to save once, via the
+  native folder picker, then saves every file there (Finder-style collision
+  handling for name clashes).
 - **Delete** everything selected at once — capped at **10 files per bulk
   delete**. For more than that, delete them directly in the Telegram app
   instead, then hit **Sync with Telegram** in Settings to bring the local

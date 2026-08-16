@@ -184,10 +184,16 @@ function selectAllAlbumFiles() {
 }
 
 async function downloadSelectedAlbumFiles() {
+  // Asked once for the whole batch, not per file -- picking a destination
+  // for every individual download would defeat the point of selecting
+  // several at once. Cancelling the picker (folder === null) aborts the
+  // whole batch rather than silently falling back to the default folder.
+  const folder = await window.pywebview.api.pick_folder_dialog();
+  if (!folder) return;
   for (const id of Array.from(ALBUM_GALLERY.selectedIds)) {
     try {
       const { job_id } = await API.request(`/api/files/${id}/download`, {
-        method: 'POST', json: { destination: 'default' },
+        method: 'POST', json: { destination: 'folder', path: folder },
       });
       showAlbumDownloadToast(job_id, id);
     } catch (e) {

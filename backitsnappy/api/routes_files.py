@@ -9,8 +9,12 @@ router = APIRouter()
 
 
 class DownloadIn(BaseModel):
-    destination: str = "default"  # "default" (~/Downloads/BackitSnappy/) or "custom"
-    path: str | None = None  # required when destination == "custom"
+    # "default" (~/Downloads/BackitSnappy/), "custom" (path is an exact file
+    # path, from the single-file Save As panel), or "folder" (path is a
+    # directory, reused with Finder-style collision handling for every file
+    # in a multi-select download -- from the native folder picker).
+    destination: str = "default"
+    path: str | None = None  # required for "custom" and "folder"
 
 
 def _file_to_dict(row) -> dict:
@@ -59,8 +63,8 @@ async def prepare_file(file_id: int, manager: TelegramManager = Depends(get_mana
 async def download_file(
     file_id: int, body: DownloadIn, manager: TelegramManager = Depends(get_manager)
 ):
-    if body.destination == "custom" and not body.path:
-        raise HTTPException(status_code=400, detail="path is required for a custom destination")
+    if body.destination in ("custom", "folder") and not body.path:
+        raise HTTPException(status_code=400, detail=f"path is required for a {body.destination} destination")
     try:
         job_id = manager.start_download(file_id, body.destination, body.path)
     except ValueError as exc:

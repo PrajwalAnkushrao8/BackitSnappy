@@ -62,6 +62,19 @@ class JSBridge:
             return None
         return result[0]
 
+    def pick_folder_dialog(self) -> str | None:
+        """Native macOS folder picker, for choosing where a multi-file
+        download lands -- the single-file SAVE_DIALOG above asks for an
+        exact filename, which doesn't make sense for a batch. Same
+        off-main-thread safety as save_file_dialog."""
+        result = self.window.create_file_dialog(
+            webview.FOLDER_DIALOG,
+            directory=str(Path.home() / "Downloads"),
+        )
+        if not result:
+            return None
+        return result[0]
+
 
 def _set_dock_icon() -> None:
     """pywebview's Cocoa backend doesn't support the `icon` param (that's
